@@ -333,6 +333,9 @@ if (import.meta.main) {
     port: 3000,
     routes: {
       "/": Bun.file(new URL("index.html", import.meta.url)),
+      "/manifest.webmanifest": Bun.file(new URL("manifest.webmanifest", import.meta.url)),
+      "/icon-180.png": Bun.file(new URL("icon-180.png", import.meta.url)),
+      "/icon-512.png": Bun.file(new URL("icon-512.png", import.meta.url)),
       "/auth-client.js": Bun.file(new URL("node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js", import.meta.url)),
       "/api/auth/options": { POST: async (request) => {
         try {
