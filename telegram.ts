@@ -1,4 +1,4 @@
-// TEMPORARY: no access control. Anyone who finds the bot can use it, and everything they send lands in user 1's notes.
+// TEMPORARY: no access control. Anyone who finds the bot can use it; each chat has isolated memory.
 // Add an allowlist of Telegram user IDs before sharing the bot's username.
 import { converse, toVoiceNote } from "./server";
 import type { captureMemory } from "./harness";
@@ -49,6 +49,7 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
   }
   try {
     const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg", {
+      sandboxRoot: `${import.meta.dir}/notes/telegram/${chat}`,
       source: "telegram",
       capture: dependencies.capture,
     });

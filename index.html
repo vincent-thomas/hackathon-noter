@@ -5,6 +5,20 @@
 <style>
   body { margin: 0; min-height: 100vh; display: grid; place-content: center; justify-items: center;
          font: 16px system-ui, sans-serif; background: #111; color: #ccc; }
+  [hidden] { display: none !important; }
+  #auth { width: min(24rem, calc(100vw - 3rem)); text-align: center; }
+  #auth h1 { color: #fff; font-size: 2rem; margin: 0 0 .5rem; }
+  #auth p { opacity: .7; line-height: 1.5; }
+  #auth input { box-sizing: border-box; width: 100%; margin: 1rem 0 .75rem; padding: .85rem 1rem; border: 1px solid #444;
+                border-radius: .75rem; background: #181818; color: #fff; font: inherit; }
+  .auth-actions { display: grid; gap: .75rem; }
+  .auth-actions button, #logout { border: 0; border-radius: .75rem; padding: .8rem 1rem; font: inherit; cursor: pointer; }
+  #register { background: #1f6feb; color: white; }
+  #login { background: #292929; color: #eee; }
+  #authStatus { min-height: 1.25rem; color: #f88; font-size: .85rem; }
+  #app { display: grid; place-items: center; }
+  #account { position: fixed; top: 1rem; right: 1rem; display: flex; align-items: center; gap: .75rem; font-size: .8rem; }
+  #logout { padding: .4rem .65rem; background: #292929; color: #bbb; }
   .orb { position: relative; }
   .orb canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 80vmin; height: 80vmin; pointer-events: none; }
   button { position: relative; display: block; width: 44vmin; height: 44vmin; border: 0; border-radius: 50%; font-size: 18vmin; background: #1f6feb; cursor: pointer; }
@@ -12,13 +26,94 @@
   .thinking { opacity: .5; }
   #status { position: relative; margin: 1.5rem 0 0; max-width: 32rem; text-align: center; font-size: .85rem; opacity: .6; }
 </style>
-<div class="orb">
-  <canvas id="spectrum"></canvas>
-  <button id="mic">🎤</button>
-</div>
-<p id="status">Tap to talk</p>
+<section id="auth" hidden>
+  <h1>Noter</h1>
+  <p>Your external brain. Create an account with a passkey—no password required.</p>
+  <input id="name" autocomplete="name webauthn" maxlength="80" placeholder="Your name">
+  <div class="auth-actions">
+    <button id="register">Create account</button>
+    <button id="login">Sign in with passkey</button>
+  </div>
+  <p id="authStatus"></p>
+</section>
+<main id="app" hidden>
+  <div id="account"><span id="accountName"></span><button id="logout">Sign out</button></div>
+  <div class="orb">
+    <canvas id="spectrum"></canvas>
+    <button id="mic" aria-label="Record a thought or question">🎤</button>
+  </div>
+  <p id="status">Tap to talk</p>
+</main>
+<script src="/auth-client.js"></script>
 <script>
   let recorder, current;
+  const { startRegistration, startAuthentication, browserSupportsWebAuthn } = SimpleWebAuthnBrowser;
+  const authView = document.getElementById("auth");
+  const appView = document.getElementById("app");
+  const nameInput = document.getElementById("name");
+  const registerButton = document.getElementById("register");
+  const loginButton = document.getElementById("login");
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+    return json;
+  }
+
+  function showApp(user) {
+    authView.hidden = true;
+    appView.hidden = false;
+    accountName.textContent = user.name;
+    authStatus.textContent = "";
+  }
+
+  function showAuth(message = "") {
+    appView.hidden = true;
+    authView.hidden = false;
+    authStatus.textContent = message;
+  }
+
+  registerButton.onclick = async () => {
+    authStatus.textContent = "";
+    try {
+      if (!nameInput.value.trim()) throw new Error("Enter your name first.");
+      const ceremony = await api("/api/auth/register/options", { name: nameInput.value.trim() });
+      const response = await startRegistration({ optionsJSON: ceremony.options });
+      const result = await api("/api/auth/register/verify", { ceremonyId: ceremony.ceremonyId, response });
+      showApp(result.user);
+    } catch (error) {
+      authStatus.textContent = error.message;
+    }
+  };
+
+  loginButton.onclick = async () => {
+    authStatus.textContent = "";
+    try {
+      const ceremony = await api("/api/auth/login/options", {});
+      const response = await startAuthentication({ optionsJSON: ceremony.options });
+      const result = await api("/api/auth/login/verify", { ceremonyId: ceremony.ceremonyId, response });
+      showApp(result.user);
+    } catch (error) {
+      authStatus.textContent = error.message;
+    }
+  };
+
+  logout.onclick = async () => {
+    await api("/api/auth/logout", {});
+    showAuth();
+  };
+
+  if (!browserSupportsWebAuthn()) {
+    showAuth("This browser does not support passkeys.");
+    registerButton.disabled = loginButton.disabled = true;
+  } else {
+    api("/api/auth/me").then(({ user }) => showApp(user)).catch(() => showAuth());
+  }
 
   // A glowing blob around the mic: 0–6 kHz, where speech lives, mapped onto the rim and mirrored left/right.
   function showSpectrum(stream) {
@@ -76,6 +171,7 @@
         body: new Blob(chunks),
       });
       mic.className = "";
+      if (res.status === 401) return showAuth("Please sign in again.");
       if (!res.ok) return (status.textContent = await res.text());
       status.textContent = "You said: " + decodeURIComponent(res.headers.get("x-transcript"));
       new Audio(URL.createObjectURL(await res.blob())).play();
