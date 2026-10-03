@@ -184,6 +184,13 @@ if (import.meta.main) {
     routes: {
       "/": Bun.file(new URL("index.html", import.meta.url)),
       "/auth-client.js": Bun.file(new URL("node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js", import.meta.url)),
+      "/api/auth/options": { POST: async (request) => {
+        try {
+          return Response.json(await auth().options(await jsonBody(request)));
+        } catch (error) {
+          return jsonError(error, 400);
+        }
+      } },
       "/api/auth/register/options": { POST: (request) => authEndpoint(request, "register-options") },
       "/api/auth/register/verify": { POST: (request) => authEndpoint(request, "register-verify") },
       "/api/auth/login/options": { POST: (request) => authEndpoint(request, "login-options") },

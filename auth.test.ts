@@ -22,10 +22,10 @@ afterEach(async () => {
 
 test("creates discoverable, user-verified passkey registration options", async () => {
   const auth = await setup();
-  const result = await auth.registrationOptions({ name: "Vincent" });
+  const result = await auth.registrationOptions({ email: "vincent@example.com" });
 
   expect(result.options.rp.id).toBe("localhost");
-  expect(result.options.user.name).toBe("Vincent");
+  expect(result.options.user.name).toBe("vincent@example.com");
   expect(result.options.authenticatorSelection).toMatchObject({
     residentKey: "required",
     userVerification: "required",
@@ -61,8 +61,26 @@ test("resolves and revokes an opaque HttpOnly session", async () => {
   expect(auth.user(request)).toBeNull();
 });
 
-test("rejects invalid account names before creating a challenge", async () => {
+test("rejects invalid email addresses before creating a challenge", async () => {
   const auth = await setup();
-  await expect(auth.registrationOptions({ name: "" })).rejects.toThrow();
+  await expect(auth.registrationOptions({ email: "not-an-email" })).rejects.toThrow();
   expect(auth.db.query("SELECT COUNT(*) AS count FROM challenges").get()).toEqual({ count: 0 });
+});
+
+test("uses one email entry point to choose signup or login", async () => {
+  const auth = await setup();
+  const email = "vincent@example.com";
+
+  const signup = await auth.options({ email });
+  expect(signup.mode).toBe("register");
+
+  const userId = crypto.randomUUID();
+  auth.db.query("INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
+    .run(userId, "vincent", email, Date.now());
+  auth.db.query(`INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`).run("credential-id", userId, new Uint8Array([1]), 0, "[]", Date.now());
+
+  const login = await auth.options({ email: "  VINCENT@example.com " });
+  expect(login.mode).toBe("login");
+  expect(login.options.allowCredentials).toEqual([{ id: "credential-id", transports: [], type: "public-key" }]);
 });

@@ -15,7 +15,7 @@ const SESSION_COOKIE = "noter_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 const CHALLENGE_SECONDS = 5 * 60;
 
-const RegisterOptionsInput = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+const EmailInput = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict();
 const CeremonyInput = z.object({ ceremonyId: z.string().uuid(), response: z.record(z.string(), z.unknown()) }).strict();
 
 type ChallengeRow = {
@@ -53,6 +53,7 @@ export class PasskeyAuth {
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        email TEXT,
         created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS credentials (
@@ -77,22 +78,34 @@ export class PasskeyAuth {
         expires_at INTEGER NOT NULL
       );
     `);
+    const columns = this.db.query("PRAGMA table_info(users)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "email")) this.db.run("ALTER TABLE users ADD COLUMN email TEXT");
+    this.db.run("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email) WHERE email IS NOT NULL");
   }
 
   async registrationOptions(input: unknown) {
-    const { name } = RegisterOptionsInput.parse(input);
+    const { email } = EmailInput.parse(input);
+    if (this.db.query("SELECT 1 FROM users WHERE email = ?").get(email)) throw new Error("account already exists");
     const userId = crypto.randomUUID();
+    const name = email.split("@")[0];
     const options = await generateRegistrationOptions({
       rpName: "Noter",
       rpID: this.rpID,
       userID: new TextEncoder().encode(userId),
-      userName: name,
+      userName: email,
       userDisplayName: name,
       attestationType: "none",
       authenticatorSelection: { residentKey: "required", userVerification: "required" },
     });
-    const ceremonyId = this.#challenge("registration", options.challenge, userId, name);
+    const ceremonyId = this.#challenge("registration", options.challenge, userId, email);
     return { ceremonyId, options };
+  }
+
+  async options(input: unknown) {
+    const { email } = EmailInput.parse(input);
+    const user = this.db.query("SELECT id FROM users WHERE email = ?").get(email) as { id: string } | null;
+    if (!user) return { mode: "register" as const, ...await this.registrationOptions({ email }) };
+    return { mode: "login" as const, ...await this.authenticationOptions({ email }) };
   }
 
   async verifyRegistration(input: unknown): Promise<{ user: AuthUser; cookie: string }> {
@@ -108,9 +121,11 @@ export class PasskeyAuth {
     if (!verification.verified || !challenge.user_id || !challenge.name) throw new Error("passkey registration failed");
 
     const credential = verification.registrationInfo.credential;
+    const email = challenge.name;
+    const name = email.split("@")[0];
     this.db.transaction(() => {
-      this.db.query("INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)")
-        .run(challenge.user_id, challenge.name, Date.now());
+      this.db.query("INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
+        .run(challenge.user_id, name, email, Date.now());
       this.db.query(`INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at)
         VALUES (?, ?, ?, ?, ?, ?)`)
         .run(
@@ -122,14 +137,23 @@ export class PasskeyAuth {
           Date.now(),
         );
     })();
-    return { user: { id: challenge.user_id, name: challenge.name }, cookie: this.#session(challenge.user_id) };
+    return { user: { id: challenge.user_id, name }, cookie: this.#session(challenge.user_id) };
   }
 
-  async authenticationOptions() {
+  async authenticationOptions(input?: unknown) {
+    const email = input === undefined ? undefined : EmailInput.parse(input).email;
+    const credentials = email
+      ? this.db.query(`SELECT credentials.id, credentials.transports FROM credentials
+          JOIN users ON users.id = credentials.user_id WHERE users.email = ?`).all(email) as Array<{ id: string; transports: string }>
+      : [];
+    if (email && credentials.length === 0) throw new Error("account not found");
     const options = await generateAuthenticationOptions({
       rpID: this.rpID,
       userVerification: "required",
-      allowCredentials: [],
+      allowCredentials: credentials.map((credential) => ({
+        id: credential.id,
+        transports: JSON.parse(credential.transports),
+      })),
     });
     return { ceremonyId: this.#challenge("authentication", options.challenge), options };
   }
