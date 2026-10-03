@@ -161,7 +161,7 @@
         </div>
       </div>
     </div>
-    <div class="settings-group" id="telegramSettings" hidden>
+    <div class="settings-group" id="telegramSettings">
       <p class="settings-label">Telegram</p>
       <div class="settings-card">
         <div class="settings-row">
@@ -208,8 +208,6 @@
   const linkTelegramButton = document.getElementById("linkTelegram");
   let signedInUser;
 
-  if (location.hostname === "localhost" || location.hostname === "127.0.0.1") telegramSettings.hidden = false;
-
   async function api(path, body) {
     const res = await fetch(path, {
       method: body === undefined ? "GET" : "POST",
@@ -233,6 +231,7 @@
     authStatus.textContent = "";
     renderAppRoute();
     loadBriefingSettings();
+    loadTelegramSettings();
   }
 
   function showAuth(message = "") {
@@ -315,6 +314,15 @@
       linkTelegramButton.disabled = false;
     }
   };
+
+  async function loadTelegramSettings() {
+    try {
+      const settings = await api("/api/settings/telegram");
+      if (settings.linked) telegramStatus.textContent = "Linked. Telegram messages use this account's memory.";
+    } catch {
+      telegramStatus.textContent = "Could not load Telegram settings.";
+    }
+  }
 
   continueAuthButton.onclick = async () => {
     authStatus.textContent = "";
