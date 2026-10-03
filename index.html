@@ -1,11 +1,11 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Noter</title>
+<title>notd</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Noter">
+<meta name="apple-mobile-web-app-title" content="notd">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="theme-color" content="#0b0b0a">
 <style>
@@ -119,12 +119,12 @@
   }
   @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 </style>
-<div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5v14M7 5l10 14V5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Noter</div>
+<div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 18V9m0 4a5 5 0 0 1 10 0v5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>notd</div>
 <section id="auth" hidden>
   <div class="auth-panel">
     <p class="eyebrow">Your external memory</p>
     <h1>Clear your head.<br>Keep what matters.</h1>
-    <p class="lede">Speak naturally—thoughts, tasks, questions, half-formed ideas. Noter remembers and organizes them for later.</p>
+    <p class="lede">Speak naturally—thoughts, tasks, questions, half-formed ideas. notd remembers and organizes them for later.</p>
     <div class="auth-form">
       <input id="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" aria-label="Email address" required>
       <div class="auth-actions">
@@ -171,7 +171,7 @@
       <p class="settings-label">Telegram</p>
       <div class="settings-card">
         <div class="settings-row">
-          <div class="settings-detail"><strong>Link Telegram</strong><span id="telegramStatus">Generate a one-time code, then send it to your Noter bot.</span><span id="telegramCode"></span></div>
+          <div class="settings-detail"><strong>Link Telegram</strong><span id="telegramStatus">Generate a one-time code, then send it to your notd bot.</span><span id="telegramCode"></span></div>
           <button id="linkTelegram">Generate code</button>
         </div>
       </div>
@@ -179,13 +179,13 @@
     <div class="settings-group">
       <p class="settings-label">Security & data</p>
       <div class="settings-card">
-        <div class="settings-row"><div class="settings-detail"><strong>Passkey protected</strong><span>Your device verifies every sign-in. Noter never stores a password.</span></div><span class="status-chip">Active</span></div>
+        <div class="settings-row"><div class="settings-detail"><strong>Passkey protected</strong><span>Your device verifies every sign-in. notd never stores a password.</span></div><span class="status-chip">Active</span></div>
         <div class="settings-row"><div class="settings-detail"><strong>Private memory</strong><span>Your captures and derived notes are isolated to this account.</span></div></div>
       </div>
     </div>
     <div class="settings-group">
       <p class="settings-label">Session</p>
-      <div class="settings-card"><button id="logout">Sign out of Noter</button></div>
+      <div class="settings-card"><button id="logout">Sign out of notd</button></div>
     </div>
   </section>
 </main>
@@ -312,7 +312,7 @@
     telegramCode.textContent = "";
     try {
       const link = await api("/api/settings/telegram/link-code", {});
-      telegramStatus.textContent = "Send this command to your Noter bot within 10 minutes:";
+      telegramStatus.textContent = "Send this command to your notd bot within 10 minutes:";
       telegramCode.textContent = `/link ${link.code}`;
     } catch (error) {
       telegramStatus.textContent = error.message;

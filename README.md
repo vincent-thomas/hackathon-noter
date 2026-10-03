@@ -1,4 +1,4 @@
-# Noter
+# notd
 
 Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), stores the raw capture, lets a Gemini Flash agent (`gemini-3.5-flash-lite`) organize useful persistent memory, and acknowledges the capture with Gemini TTS (`gemini-3.8-flash-lite-tts`). Telegram voice notes use the same pipeline.
 
@@ -8,7 +8,7 @@ Production: https://noter.7p80u8m6.workers.dev
 
 Thoughts rarely arrive as clean tasks or calendar entries. A person may mention a commitment, an uncertain idea, and a question in the same sentence. Conventional note-taking tools make the person stop, classify that information, and decide where it belongs. That friction is often enough to prevent capture entirely.
 
-Noter is an external brain for those unstructured thoughts. The user speaks or types naturally; Noter preserves the original capture, extracts only information with future value, and organizes it into durable tasks, events, and general memory. The same interaction may also contain a question, which Noter answers from accumulated memory. No note type, form, or approval step is required.
+notd is an external brain for those unstructured thoughts. The user speaks or types naturally; notd preserves the original capture, extracts only information with future value, and organizes it into durable tasks, events, and general memory. The same interaction may also contain a question, which notd answers from accumulated memory. No note type, form, or approval step is required.
 
 The core flow is:
 
@@ -149,11 +149,11 @@ Telegram accepts both voice notes and text, and replies with text. Keeping repli
 
 1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`.
 2. Configure `TELEGRAM_BOT_TOKEN` as a Worker secret (or in `.dev.vars` locally).
-3. Sign in to Noter, open Settings, and select **Generate code** under Telegram.
+3. Sign in to notd, open Settings, and select **Generate code** under Telegram.
 4. Send `/link CODE` to the bot within 10 minutes.
 5. Send your bot a voice note or text message. It uses the same memory as your web account and answers in kind.
 
-The Worker receives Telegram updates on one shared `POST /api/telegram/webhook`. Generating a link code configures that HTTPS webhook with `setWebhook`. Telegram signs deliveries with `TELEGRAM_WEBHOOK_SECRET`; the Worker then maps the incoming chat ID to a Noter user in D1. It does **not** register one webhook per user. A webhook needs a public URL, so to try the bot against a local Worker, expose it through a tunnel. If something breaks, the chat only gets an error line and the details go to the Worker logs.
+The Worker receives Telegram updates on one shared `POST /api/telegram/webhook`. Generating a link code configures that HTTPS webhook with `setWebhook`. Telegram signs deliveries with `TELEGRAM_WEBHOOK_SECRET`; the Worker then maps the incoming chat ID to a notd user in D1. It does **not** register one webhook per user. A webhook needs a public URL, so to try the bot against a local Worker, expose it through a tunnel. If something breaks, the chat only gets an error line and the details go to the Worker logs.
 
 For Cloudflare, configure both secrets before generating a production link code:
 
@@ -164,7 +164,7 @@ bunx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 
 Keep the bot token and webhook secret private. Whoever has the bot token controls the bot; if it leaks, send `/revoke` to BotFather and replace the Worker secret.
 
-An unlinked Telegram chat receives linking instructions and cannot call Gemini or access memory. Link codes are single-use, expire after 10 minutes, and require an authenticated Noter session to create.
+An unlinked Telegram chat receives linking instructions and cannot call Gemini or access memory. Link codes are single-use, expire after 10 minutes, and require an authenticated notd session to create.
 
 ## Deploy to Cloudflare Workers
 
@@ -201,7 +201,7 @@ Add the Resend secret before deploying:
 bunx wrangler secret put RESEND_API_KEY
 ```
 
-The default sender is `Noter <onboarding@resend.dev>`, which is suitable for Resend testing. After verifying a sending domain, change `RESEND_FROM` in `wrangler.jsonc` to an address on that domain.
+The default sender is `notd <onboarding@resend.dev>`, which is suitable for Resend testing. After verifying a sending domain, change `RESEND_FROM` in `wrangler.jsonc` to an address on that domain.
 
 ## Technical evaluation guide
 
@@ -213,7 +213,7 @@ D1 and R2 have intentionally different responsibilities. D1 holds relational con
 
 ### Passkeys and account lifecycle
 
-The user enters an email and performs one passkey ceremony. If the email is new, successful WebAuthn registration creates the account and credential; if it already exists, successful authentication signs the user in. Private key material never reaches Noter. The server stores the public credential and counter in D1, requires user verification, checks the challenge, origin, and relying-party ID, and then creates a revocable session. The email identifies the intended Noter account and is also the briefing destination; the passkey proves possession of the credential registered to that account.
+The user enters an email and performs one passkey ceremony. If the email is new, successful WebAuthn registration creates the account and credential; if it already exists, successful authentication signs the user in. Private key material never reaches notd. The server stores the public credential and counter in D1, requires user verification, checks the challenge, origin, and relying-party ID, and then creates a revocable session. The email identifies the intended notd account and is also the briefing destination; the passkey proves possession of the credential registered to that account.
 
 ### Append-only memory harness
 

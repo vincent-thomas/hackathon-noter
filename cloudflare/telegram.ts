@@ -49,7 +49,7 @@ async function handleMessage(env: Env, message: any) {
     const user = await consumeCode(env, chatId, link[1]);
     await send(env, "sendMessage", {
       chat_id: chatId,
-      text: user ? `Linked to ${user.email}. You can send a voice note or text now.` : "That link code is invalid or expired. Generate a new one in Noter Settings.",
+      text: user ? `Linked to ${user.email}. You can send a voice note or text now.` : "That link code is invalid or expired. Generate a new one in notd Settings.",
       reply_parameters: reply,
     });
     return;
@@ -59,7 +59,7 @@ async function handleMessage(env: Env, message: any) {
   if (!user) {
     await send(env, "sendMessage", {
       chat_id: chatId,
-      text: "Link a Noter account first. Sign in to Noter, open Settings, generate a Telegram code, then send /link CODE here.",
+      text: "Link a notd account first. Sign in to notd, open Settings, generate a Telegram code, then send /link CODE here.",
       reply_parameters: reply,
     });
     return;

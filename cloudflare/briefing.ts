@@ -80,7 +80,7 @@ export async function runMorningBriefings(env: Env, now = new Date()): Promise<{
           "idempotency-key": `morning-${user.id}-${local.date}`,
         },
         body: JSON.stringify({
-          from: env.RESEND_FROM || "Noter <onboarding@resend.dev>",
+          from: env.RESEND_FROM || "notd <onboarding@resend.dev>",
           to: [user.email],
           subject: `Your morning briefing — ${local.date}`,
           text: briefing.content,
@@ -104,5 +104,5 @@ export async function runMorningBriefings(env: Env, now = new Date()): Promise<{
 
 function briefingHtml(content: string, date: string) {
   const escaped = content.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-  return `<div style="max-width:600px;margin:auto;padding:32px 20px;background:#0b0b0a;color:#f7f7f3;font:16px/1.6 system-ui,sans-serif"><p style="color:#b7df39;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase">Noter · ${date}</p><div style="white-space:pre-wrap">${escaped}</div></div>`;
+  return `<div style="max-width:600px;margin:auto;padding:32px 20px;background:#0b0b0a;color:#f7f7f3;font:16px/1.6 system-ui,sans-serif"><p style="color:#b7df39;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase">notd · ${date}</p><div style="white-space:pre-wrap">${escaped}</div></div>`;
 }
