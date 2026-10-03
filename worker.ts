@@ -59,10 +59,23 @@ async function withUser(env: Env, request: Request, work: (user: User) => Promis
   return user ? work(user) : jsonError("authentication required", 401);
 }
 
+export function passkeyContext(request: Request): { rpID: string; origin: string } {
+  const workerUrl = new URL(request.url);
+  let browserUrl = workerUrl;
+  const origin = request.headers.get("origin");
+  if (origin) {
+    const candidate = new URL(origin);
+    const localDevelopment = candidate.hostname === "localhost" || candidate.hostname === "127.0.0.1";
+    if (candidate.hostname === workerUrl.hostname || localDevelopment) browserUrl = candidate;
+  }
+  return { rpID: browserUrl.hostname, origin: browserUrl.origin };
+}
+
 async function api(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const { pathname } = url;
-  const authEnv = { ...env, PASSKEY_RP_ID: url.hostname, PASSKEY_ORIGIN: url.origin };
+  const passkey = passkeyContext(request);
+  const authEnv = { ...env, PASSKEY_RP_ID: passkey.rpID, PASSKEY_ORIGIN: passkey.origin };
   if (request.method === "POST" && pathname === "/api/auth/options") {
     try { return Response.json(await authOptions(authEnv, await body(request))); } catch (error) { return jsonError(error); }
   }
