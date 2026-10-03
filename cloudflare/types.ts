@@ -3,6 +3,8 @@ export interface Env {
   MEMORY: R2Bucket;
   ASSETS: Fetcher;
   GEMINI_API_KEY: string;
+  RESEND_API_KEY: string;
+  RESEND_FROM?: string;
   PASSKEY_RP_ID: string;
   PASSKEY_ORIGIN: string;
   HARNESS_MODEL?: string;

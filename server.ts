@@ -211,6 +211,13 @@ if (import.meta.main) {
         return user ? Response.json({ user }) : Response.json({ error: "authentication required" }, { status: 401 });
       } },
       "/api/auth/logout": { POST: (request) => Response.json({ ok: true }, { headers: { "set-cookie": auth().logout(request) } }) },
+      "/api/settings/briefing": {
+        GET: (request) => withUser(request, async (user) => Response.json(auth().briefingSettings(user.id))),
+        POST: (request) => withUser(request, async (user) => {
+          try { return Response.json(auth().updateBriefingSettings(user.id, await jsonBody(request))); }
+          catch (error) { return jsonError(error, 400); }
+        }),
+      },
       "/api/talk": { POST: (request) => withUser(request, (user) => talk(request, user.id)) },
       "/api/capture/text": { POST: (request) => withUser(request, (user) => captureText(request, user.id)) },
       "/api/query": { POST: (request) => withUser(request, (user) => queryMemory(request, user.id)) },

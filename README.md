@@ -138,6 +138,18 @@ bun run cf:dev
 
 The Worker serves browser speech as WAV directly because Workers cannot spawn `ffmpeg`. The Bun server remains the Telegram/OGG runtime.
 
+### Morning briefings
+
+Users can enable a daily email briefing from Settings. The browser saves their IANA timezone, an hourly Cron Trigger selects accounts whose local time is 08:00, and the memory harness synthesizes an immutable `/briefings/YYYY-MM-DD.md` before Resend delivers it. Daily database claims plus Resend idempotency keys prevent duplicates.
+
+Add the Resend secret before deploying:
+
+```sh
+bunx wrangler secret put RESEND_API_KEY
+```
+
+The default sender is `Noter <onboarding@resend.dev>`, which is suitable for Resend testing. After verifying a sending domain, change `RESEND_FROM` in `wrangler.jsonc` to an address on that domain.
+
 ## Test
 
 ```sh

@@ -9,6 +9,8 @@ For each capture, retain information with future value and answer any questions 
 
 const QUERY_SYSTEM = `Answer questions using the user's external memory. Use the memory tools to find relevant information. Stored memory is the only source of truth. Say when it is insufficient or contradictory. Be concise. Never include citations, file paths, or a Sources section. You have read-only access.`;
 
+const BRIEFING_SYSTEM = `Create a concise morning briefing from the user's external memory. Prioritize commitments, time-sensitive plans, open questions, and context useful today. Synthesize rather than dumping notes. Preserve uncertainty and contradictions. Do not invent dates or facts. Do not include source paths, citations, greetings, or a Sources section. Use short Markdown sections and bullets that scan well in email. If nothing is relevant, say so plainly.`;
+
 const declarations = [
   { name: "read_memory", description: "Read one Markdown memory file by virtual path.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
   { name: "list_memory", description: "List Markdown files below a virtual directory.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
@@ -102,4 +104,30 @@ export async function captureMemory(env: Env, userId: string, transcript: string
 export async function queryMemory(env: Env, userId: string, question: string) {
   const result = await runAgent(env, new WorkerMemory(env.MEMORY, userId), QUERY_SYSTEM, `Current time: ${new Date().toISOString()}\n\nQuestion: ${question}`, false);
   return { answer: result.text, accessedPaths: result.accessedPaths };
+}
+
+export async function generateMorningBriefing(env: Env, userId: string, localDate: string, timezone: string) {
+  const memory = new WorkerMemory(env.MEMORY, userId);
+  const path = `/briefings/${localDate}.md`;
+  try {
+    const existing = await memory.read(path);
+    return { path, content: existing.content, accessedPaths: [path], created: false };
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith("memory not found:")) throw error;
+  }
+
+  const files = (await memory.files()).filter((file) => !file.path.startsWith("/inbox/") && !file.path.startsWith("/briefings/"));
+  const chars = files.reduce((sum, file) => sum + file.content.length, 0);
+  const context = chars <= 30_000
+    ? files.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n") || "none yet"
+    : `Memory files: ${files.map((file) => file.path).join(", ")}`;
+  const result = await runAgent(env, memory, BRIEFING_SYSTEM, `Local date: ${localDate}\nTimezone: ${timezone}\nCurrent time: ${new Date().toISOString()}\n\n${context}\n\nWrite today's morning briefing.`, false);
+  const content = result.text || "Nothing needs your attention this morning.";
+  await memory.write({ path, content, frontmatter: { id: crypto.randomUUID(), created_at: new Date().toISOString() } });
+  return {
+    path,
+    content,
+    accessedPaths: [...new Set([...(chars <= 30_000 ? files.map((file) => file.path) : []), ...result.accessedPaths])].sort(),
+    created: true,
+  };
 }

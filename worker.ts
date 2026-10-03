@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { authOptions, currentUser, logout, verifyAuthentication, verifyRegistration } from "./cloudflare/auth";
 import { captureMemory, queryMemory } from "./cloudflare/agent";
+import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./cloudflare/briefing";
 import type { Env, User } from "./cloudflare/types";
 
 const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).strict();
@@ -84,6 +85,14 @@ async function api(request: Request, env: Env): Promise<Response | null> {
   if (request.method === "POST" && pathname === "/api/auth/logout") {
     return Response.json({ ok: true }, { headers: { "set-cookie": await logout(env, request) } });
   }
+  if (request.method === "GET" && pathname === "/api/settings/briefing") return withUser(env, request, async (user) => {
+    try { return Response.json(await briefingSettings(env, user.id)); }
+    catch (error) { return jsonError(error); }
+  });
+  if (request.method === "POST" && pathname === "/api/settings/briefing") return withUser(env, request, async (user) => {
+    try { return Response.json(await updateBriefingSettings(env, user.id, await body(request))); }
+    catch (error) { return jsonError(error); }
+  });
   if (request.method === "POST" && pathname === "/api/capture/text") return withUser(env, request, async (user) => {
     try {
       const input = TextInput.parse(await body(request));
@@ -112,5 +121,9 @@ async function api(request: Request, env: Env): Promise<Response | null> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     return await api(request, env) ?? env.ASSETS.fetch(request);
+  },
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    const result = await runMorningBriefings(env, new Date(controller.scheduledTime));
+    console.log("morning briefing run:", result);
   },
 } satisfies ExportedHandler<Env>;

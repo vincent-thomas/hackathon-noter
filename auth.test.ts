@@ -84,3 +84,18 @@ test("uses one email entry point to choose signup or login", async () => {
   expect(login.mode).toBe("login");
   expect(login.options.allowCredentials).toEqual([{ id: "credential-id", transports: [], type: "public-key" }]);
 });
+
+test("stores morning briefing preference and timezone", async () => {
+  const auth = await setup();
+  const userId = crypto.randomUUID();
+  auth.db.query("INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
+    .run(userId, "vincent", "vincent@example.com", Date.now());
+
+  expect(auth.briefingSettings(userId)).toMatchObject({ enabled: false, timezone: "UTC", hour: 8 });
+  expect(auth.updateBriefingSettings(userId, { enabled: true, timezone: "Europe/Stockholm" })).toMatchObject({
+    enabled: true,
+    timezone: "Europe/Stockholm",
+    hour: 8,
+  });
+  expect(() => auth.updateBriefingSettings(userId, { enabled: true, timezone: "not/a-zone" })).toThrow("invalid timezone");
+});
