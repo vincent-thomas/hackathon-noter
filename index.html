@@ -212,8 +212,42 @@
     return () => (target = 0);
   }
 
+  // Replies stream in as raw 24 kHz mono 16-bit PCM. Each piece is queued right after the previous one,
+  // so playback starts with the first piece instead of after the whole reply.
+  let speaker;
+  async function playStream(body) {
+    let at = speaker.currentTime;
+    let carry = new Uint8Array(0);
+    for (const reader = body.getReader(); ;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      // The network splits the stream anywhere, so half a sample can carry over to the next piece.
+      const bytes = new Uint8Array(carry.length + value.length);
+      bytes.set(carry);
+      bytes.set(value, carry.length);
+      const whole = bytes.length - (bytes.length % 2);
+      carry = bytes.slice(whole);
+      if (!whole) continue;
+      const pcm = new DataView(bytes.buffer, 0, whole);
+      const buffer = speaker.createBuffer(1, whole / 2, 24000);
+      const channel = buffer.getChannelData(0);
+      for (let i = 0; i < channel.length; i++) channel[i] = pcm.getInt16(i * 2, true) / 32768;
+      const source = speaker.createBufferSource();
+      source.buffer = buffer;
+      source.connect(speaker.destination);
+      at = Math.max(at, speaker.currentTime + 0.05);
+      source.start(at);
+      at += buffer.duration;
+    }
+  }
+
   mic.onclick = async () => {
-    if (recorder?.state === "recording") return recorder.stop();
+    if (recorder?.state === "recording") {
+      // Browsers only let audio start from a tap, and the reply arrives seconds after this one.
+      speaker ??= new AudioContext({ sampleRate: 24000 });
+      speaker.resume();
+      return recorder.stop();
+    }
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -233,7 +267,7 @@
       status.textContent = "Making sense of that…";
       const res = await fetch("/api/talk", {
         method: "POST",
-        headers: { "content-type": recorder.mimeType, accept: "audio/ogg" },
+        headers: { "content-type": recorder.mimeType, accept: "audio/l16" },
         body: new Blob(chunks),
       });
       mic.className = "";
@@ -241,7 +275,9 @@
       if (res.status === 401) return showAuth("Please sign in again.");
       if (!res.ok) return (status.textContent = await res.text());
       status.textContent = "You said: " + decodeURIComponent(res.headers.get("x-transcript"));
-      new Audio(URL.createObjectURL(await res.blob())).play();
+      // Echo mode sends the recording back as is, not as PCM.
+      if (res.headers.get("content-type")?.startsWith("audio/l16")) await playStream(res.body);
+      else new Audio(URL.createObjectURL(await res.blob())).play();
     };
     recorder.start();
     mic.className = "listening";
