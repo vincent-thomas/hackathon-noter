@@ -29,8 +29,12 @@ async function speak(text: string): Promise<Buffer> {
 
 // Repeats what you said; the harness goes between transcribe and speak.
 export async function talk(req: Request): Promise<Response> {
+  const recording = await req.arrayBuffer();
+  const mimeType = req.headers.get("content-type")!.split(";")[0];
+  // ECHO=1 skips Gemini, so debugging the page costs no tokens.
+  if (process.env.ECHO === "1") return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   try {
-    const transcript = await transcribe(await req.arrayBuffer(), req.headers.get("content-type")!.split(";")[0]);
+    const transcript = await transcribe(recording, mimeType);
     const audio = await speak(transcript || "I didn't catch that.");
     return new Response(audio, { headers: { "content-type": "audio/wav", "x-transcript": encodeURIComponent(transcript) } });
   } catch (err) {

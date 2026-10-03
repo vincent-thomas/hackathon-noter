@@ -15,6 +15,8 @@ Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what yo
 
 The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
 
+To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and restart with `docker compose up`. The server then plays your recording back without calling Gemini.
+
 ## Run without Docker
 
 Needs [Bun](https://bun.sh):

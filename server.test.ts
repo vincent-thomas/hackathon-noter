@@ -10,7 +10,10 @@ const post = () =>
   talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }));
 const sent = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
 
-afterEach(() => mock.restore());
+afterEach(() => {
+  mock.restore();
+  delete process.env.ECHO;
+});
 
 test("talk transcribes the recording and speaks the transcript back", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
@@ -38,4 +41,14 @@ test("talk surfaces a Gemini failure", async () => {
   const res = await post();
   expect(res.status).toBe(502);
   expect(await res.text()).toContain("gemini-3.5-transcribe 403: bad key");
+});
+
+test("ECHO=1 plays the recording back without calling Gemini", async () => {
+  process.env.ECHO = "1";
+  const gemini = spyOn(globalThis, "fetch");
+  const res = await post();
+  expect(gemini).not.toHaveBeenCalled();
+  expect(res.headers.get("content-type")).toBe("audio/webm");
+  expect(res.headers.get("x-transcript")).toBe("(echo)");
+  expect(await res.text()).toBe("abc");
 });
