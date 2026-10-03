@@ -1,8 +1,12 @@
 services:
   app:
-    image: oven/bun:1-alpine
-    working_dir: /app
-    volumes: [".:/app"]
+    build: .
+    # Same path as on the host: the sandbox's notes mount goes through the host's Docker daemon.
+    working_dir: ${PWD}
+    volumes:
+      - .:${PWD}
+      # Lets the app start sandbox containers. This is root on the host: fine for a local PoC, never for a shared box.
+      - /var/run/docker.sock:/var/run/docker.sock
     command: bun --watch server.ts
     ports: ["3000:3000"]
     environment:

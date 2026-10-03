@@ -1,6 +1,6 @@
 # Noter
 
-Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`) and says it back with Gemini TTS (`gemini-3.8-flash-tts`). The harness that answers comes next.
+Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), hands the text to a harness running in a sandbox container, and speaks the harness's reply with Gemini TTS (`gemini-3.8-flash-tts`). For now the harness only files each transcript as a note and reports the count. The LLM that records, queries and updates notes comes next.
 
 ## Run it
 
@@ -11,15 +11,27 @@ echo GEMINI_API_KEY=your-key > .env
 docker compose up
 ```
 
-Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said and a Gemini voice repeats it.
+Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said, and a Gemini voice answers "The sandbox heard: … It has N notes."
 
 The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
+
+## The sandbox
+
+Each request runs the harness in a new `alpine` container with no network, no Linux capabilities, 256 MB of memory and a read-only filesystem. The container is deleted when it exits. The first request is slow while Docker pulls `alpine`.
+
+Notes are plain files in `notes/<user>/` in the project folder (gitignored). There are no users yet, so everything goes to `notes/root/`. Each sandbox gets only its user's folder, mounted at `/notes`, and that is the only place the harness can write. To start over, delete the folder.
+
+Docker mounts that folder through the host's Docker daemon, so the app container sees the project at the same absolute path as your machine. Run `docker compose` from the project folder; it uses `$PWD` for that path.
+
+The app container gets the Docker socket so it can start sandboxes. That gives it root on your machine, so keep this setup on your own laptop.
+
+## Debugging
 
 To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and restart with `docker compose up`. The server then plays your recording back without calling Gemini.
 
 ## Run without Docker
 
-Needs [Bun](https://bun.sh):
+Needs [Bun](https://bun.sh) and Docker for the sandbox:
 
 ```sh
 GEMINI_API_KEY=your-key bun --watch server.ts
@@ -36,4 +48,5 @@ Gemini is mocked in the tests, so no key is needed.
 ## Troubleshooting
 
 - **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `server.ts`. A `403` means the key is wrong.
+- **The page shows `sandbox exited …`.** The text after it is Docker's own error. `Cannot connect to the Docker daemon` means the app can't reach the Docker socket; check that Docker is running.
 - **The mic doesn't start.** Browsers only allow the microphone on `localhost` or HTTPS. Open the page at `localhost`, not at your LAN IP.
