@@ -67,3 +67,26 @@ test("the briefing harness synthesizes and persists one daily artifact", async (
   expect(gemini).toHaveBeenCalledTimes(1);
   expect((await memory.read("/briefings/2026-10-03.md")).content).toContain("Discuss deployment with Erik");
 });
+
+test("large briefing context is compressed without changing stored memory", async () => {
+  const bucket = new Bucket() as unknown as R2Bucket;
+  const memory = new WorkerMemory(bucket, "user-a");
+  const original = `# Project history\n\n${"Important deployment context. ".repeat(1_300)}`;
+  await memory.write({
+    path: "/memory/project-history.md",
+    frontmatter: { id: "memory-1", created_at: "2026-10-02T12:00:00.000Z" },
+    content: original,
+  });
+  const fetch = spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ model: "helene-1", messages: [{ role: "user", content: "Deployment context." }] }))
+    .mockResolvedValueOnce(Response.json({ candidates: [{ content: { role: "model", parts: [{ text: "## Today\n\n- Review deployment." }] } }] }));
+  const env = { MEMORY: bucket, GEMINI_API_KEY: "test", CONDENSE_API_KEY: "ak_test" } as any;
+
+  await generateMorningBriefing(env, "user-a", "2026-10-04", "Europe/Stockholm");
+
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(String(fetch.mock.calls[0][0])).toBe("https://api.condense.chat/v1/compress");
+  const geminiBody = JSON.parse(String((fetch.mock.calls[1][1] as RequestInit).body));
+  expect(geminiBody.contents[0].parts[0].text).toContain("<condensed-memory>\nDeployment context.\n</condensed-memory>");
+  expect((await memory.read("/memory/project-history.md")).content).toBe(original);
+});

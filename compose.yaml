@@ -14,3 +14,4 @@ services:
       PASSKEY_ORIGIN: ${PASSKEY_ORIGIN:-http://localhost:3000}
       ECHO: ${ECHO:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      CONDENSE_API_KEY: ${CONDENSE_API_KEY:-}

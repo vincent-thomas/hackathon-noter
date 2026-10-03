@@ -25,7 +25,12 @@ export async function runCli(request: CliRequest) {
   const sandboxRoot = resolve(process.env.MEMORY_ROOT ?? "notes/cli");
   const model = process.env.PI_MODEL;
   if (request.command === "capture") {
-    return captureMemory({ sandboxRoot, transcript: request.text, model });
+    return captureMemory({
+      sandboxRoot,
+      transcript: request.text,
+      model,
+      condense: process.env.CONDENSE_API_KEY ? { apiKey: process.env.CONDENSE_API_KEY } : undefined,
+    });
   }
   return queryMemoryWorkflow({ sandboxRoot, question: request.text, model });
 }

@@ -75,6 +75,17 @@ test("over the budget, the capture prompt lists memory paths only", () => {
   expect(inlined).toEqual([]);
 });
 
+test("a condensed prompt keeps exact-memory tools available", () => {
+  const capture = file("/inbox/a.md", "What should I do?");
+  const big = file("/memory/big.md", "x".repeat(INLINE_MEMORY_BUDGET + 1));
+  const { prompt, inlined } = capturePrompt(capture, [big], new Date(), [], "Remember Erik and deployment.");
+
+  expect(prompt).toContain("<condensed-memory>\nRemember Erik and deployment.\n</condensed-memory>");
+  expect(prompt).toContain("use memory tools when exact detail matters");
+  expect(inlined).toEqual([]);
+  expect(allInlined([big], inlined)).toBe(false);
+});
+
 test("all memory counts as inlined only when every derived file made it into the prompt", () => {
   const files = [file("/inbox/raw.md", "raw"), file("/tasks/erik.md", "Ask Erik.")];
   expect(allInlined(files, ["/tasks/erik.md"])).toBe(true);

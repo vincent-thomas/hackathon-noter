@@ -113,7 +113,12 @@ export async function captureText(request: Request, userId: string, capture: Cap
     return jsonError(error, 400);
   }
   try {
-    return Response.json(await capture({ sandboxRoot: userSandbox(userId), transcript: input.text, source: "text" }), { status: 201 });
+    return Response.json(await capture({
+      sandboxRoot: userSandbox(userId),
+      transcript: input.text,
+      source: "text",
+      ...(process.env.CONDENSE_API_KEY ? { condense: { apiKey: process.env.CONDENSE_API_KEY } } : {}),
+    }), { status: 201 });
   } catch (error) {
     console.error("text capture failed:", error);
     return jsonError(error, 502);
@@ -164,10 +169,13 @@ export async function respond(
       transcript,
       source: options.source,
       history,
+      ...(process.env.CONDENSE_API_KEY ? { condense: { apiKey: process.env.CONDENSE_API_KEY } } : {}),
       // Each tool call costs a model round trip, so these lines show where the harness spends its time.
       onEvent: (event) => {
         if (event.type === "tool_start") {
           console.log(`harness: ${Math.round(performance.now() - start)} ms, ${event.tool} ${JSON.stringify(event.input).slice(0, 120)}`);
+        } else if (event.type === "context_compression") {
+          console.log(`harness: Condense ${event.error ?? `${event.inputChars} → ${event.outputChars} chars`}`);
         }
       },
     }),

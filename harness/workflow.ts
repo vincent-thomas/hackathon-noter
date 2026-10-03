@@ -1,5 +1,6 @@
 import { processCapture, queryMemory, type AgentTraceEvent, type MemoryQueryResult, type Turn } from "./agent";
 import { createInboxCapture } from "./inbox";
+import type { CondenseOptions } from "./condense";
 
 export type CaptureMemoryResult = {
   capture: { path: string; id: string };
@@ -15,6 +16,7 @@ export async function captureMemory(options: {
   source?: "voice" | "telegram" | "text";
   model?: string;
   history?: Turn[];
+  condense?: CondenseOptions;
   onEvent?: (event: AgentTraceEvent) => void;
 }): Promise<CaptureMemoryResult> {
   const capture = await createInboxCapture(options.sandboxRoot, {
@@ -26,6 +28,7 @@ export async function captureMemory(options: {
     capturePath: capture.path,
     model: options.model,
     history: options.history,
+    condense: options.condense,
     onEvent: options.onEvent,
   });
   return { capture, ...processed };

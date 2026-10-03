@@ -6,6 +6,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { resolve } from "node:path";
+import { condenseText, type CondenseOptions } from "./condense";
 import { MemoryHarness } from "./memory";
 import { isInboxPath } from "./paths";
 import type { MemoryFile } from "./schemas";
@@ -65,6 +66,7 @@ Use list_memory, search_memory, and read_memory to find relevant information. Th
 export type AgentTraceEvent =
   | { type: "tool_start"; tool: string; input: unknown }
   | { type: "tool_end"; tool: string; isError: boolean }
+  | { type: "context_compression"; inputChars: number; outputChars?: number; error?: string }
   | { type: "assistant"; text: string };
 
 export type MemoryQueryResult = {
@@ -102,11 +104,14 @@ export function capturePrompt(
   existingFiles: MemoryFile[],
   now: Date,
   history: Turn[] = [],
+  condensedMemory?: string,
 ): { prompt: string; inlined: string[] } {
   const existing = existingFiles.filter((file) => !isInboxPath(file.path));
   const size = existing.reduce((total, file) => total + file.content.length, 0);
   const inlined = size <= INLINE_MEMORY_BUDGET ? existing : [];
-  const memory = !existing.length
+  const memory = condensedMemory !== undefined
+    ? `Existing memory, compressed for this prompt (use memory tools when exact detail matters):\n<condensed-memory>\n${condensedMemory}\n</condensed-memory>`
+    : !existing.length
     ? "Existing memory: none yet"
     : inlined.length
       ? `Existing memory, in full:\n${inlined.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n")}`
@@ -133,15 +138,29 @@ export async function processCapture(options: {
   capturePath: string;
   model?: string;
   history?: Turn[];
+  condense?: CondenseOptions;
   onEvent?: (event: AgentTraceEvent) => void;
 }): Promise<{ createdPaths: string[]; accessedPaths: string[]; response: string }> {
   const harness = new MemoryHarness(options.sandboxRoot);
   const existing = (await harness.searchMemory({})).files;
   const before = new Set(existing.map((file) => file.path));
   const capture = await harness.readMemory({ path: options.capturePath });
-  const { prompt, inlined } = capturePrompt(capture, existing, new Date(), options.history);
+  const derived = existing.filter((file) => !isInboxPath(file.path));
+  const memoryChars = derived.reduce((total, file) => total + file.content.length, 0);
+  let condensedMemory: string | undefined;
+  if (options.condense && memoryChars > INLINE_MEMORY_BUDGET) {
+    const fullContext = serializeMemoryContext(derived);
+    try {
+      const compressed = await condenseText(fullContext, options.condense);
+      if (compressed.length <= INLINE_MEMORY_BUDGET) condensedMemory = compressed;
+      options.onEvent?.({ type: "context_compression", inputChars: fullContext.length, outputChars: compressed.length });
+    } catch (error) {
+      options.onEvent?.({ type: "context_compression", inputChars: fullContext.length, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const { prompt, inlined } = capturePrompt(capture, existing, new Date(), options.history, condensedMemory);
   // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
-  const accessedPaths = new Set<string>([capture.path, ...inlined]);
+  const accessedPaths = new Set<string>([capture.path, ...inlined, ...(condensedMemory === undefined ? [] : derived.map((file) => file.path))]);
   // With all of memory in the prompt, reading, listing or searching only costs model round trips.
   const tools = createMemoryTools(harness).filter((tool) => !allInlined(existing, inlined) || tool.name === "write_memory");
   const cwd = resolve(import.meta.dir, "..");
@@ -196,6 +215,10 @@ export async function processCapture(options: {
     unsubscribe();
     session.dispose();
   }
+}
+
+export function serializeMemoryContext(files: MemoryFile[]): string {
+  return files.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n");
 }
 
 export async function queryMemory(options: {

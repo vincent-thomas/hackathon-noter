@@ -10,6 +10,7 @@ export interface Env {
   HARNESS_MODEL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
+  CONDENSE_API_KEY?: string;
 }
 
 export type User = { id: string; name: string; email: string };

@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { WorkerMemory } from "./memory";
+import { condenseText } from "../harness/condense";
 
 const CAPTURE_SYSTEM = `You maintain the user's external memory.
 
@@ -88,11 +89,14 @@ export async function captureMemory(env: Env, userId: string, transcript: string
   const capture = await memory.createInbox(transcript, source);
   const existing = (await memory.files()).filter((file) => !file.path.startsWith("/inbox/") && file.path !== capture.path);
   const chars = existing.reduce((sum, file) => sum + file.content.length, 0);
-  const context = chars <= 20_000
+  const condensed = env.CONDENSE_API_KEY && chars > 20_000
+    ? await condensedContext(env, existing, 20_000)
+    : undefined;
+  const context = condensed ?? (chars <= 20_000
     ? existing.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n") || "none yet"
-    : existing.map((file) => file.path).join(", ");
+    : existing.map((file) => file.path).join(", "));
   const result = await runAgent(env, memory, CAPTURE_SYSTEM, `Current time: ${new Date().toISOString()}\nExisting memory:\n${context}\n\n<capture>\n${transcript}\n</capture>\n\nProcess it into useful durable memory.`, true);
-  const suppliedPaths = chars <= 20_000 ? existing.map((file) => file.path) : [];
+  const suppliedPaths = chars <= 20_000 || condensed !== undefined ? existing.map((file) => file.path) : [];
   return {
     capture: { path: capture.path, id: capture.frontmatter.id },
     createdPaths: result.createdPaths,
@@ -118,16 +122,31 @@ export async function generateMorningBriefing(env: Env, userId: string, localDat
 
   const files = (await memory.files()).filter((file) => !file.path.startsWith("/inbox/") && !file.path.startsWith("/briefings/"));
   const chars = files.reduce((sum, file) => sum + file.content.length, 0);
-  const context = chars <= 30_000
+  const condensed = env.CONDENSE_API_KEY && chars > 30_000
+    ? await condensedContext(env, files, 30_000)
+    : undefined;
+  const context = condensed ?? (chars <= 30_000
     ? files.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n") || "none yet"
-    : `Memory files: ${files.map((file) => file.path).join(", ")}`;
+    : `Memory files: ${files.map((file) => file.path).join(", ")}`);
   const result = await runAgent(env, memory, BRIEFING_SYSTEM, `Local date: ${localDate}\nTimezone: ${timezone}\nCurrent time: ${new Date().toISOString()}\n\n${context}\n\nWrite today's morning briefing.`, false);
   const content = result.text || "Nothing needs your attention this morning.";
   await memory.write({ path, content, frontmatter: { id: crypto.randomUUID(), created_at: new Date().toISOString() } });
   return {
     path,
     content,
-    accessedPaths: [...new Set([...(chars <= 30_000 ? files.map((file) => file.path) : []), ...result.accessedPaths])].sort(),
+    accessedPaths: [...new Set([...(chars <= 30_000 || condensed !== undefined ? files.map((file) => file.path) : []), ...result.accessedPaths])].sort(),
     created: true,
   };
+}
+
+async function condensedContext(env: Env, files: Array<{ path: string; frontmatter: { created_at: string }; content: string }>, budget: number) {
+  const context = files.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n");
+  try {
+    const compressed = await condenseText(context, { apiKey: env.CONDENSE_API_KEY! });
+    console.log(`Condense context: ${context.length} → ${compressed.length} chars`);
+    return compressed.length <= budget ? `<condensed-memory>\n${compressed}\n</condensed-memory>` : undefined;
+  } catch (error) {
+    console.warn("Condense context compression failed; using memory paths:", error);
+    return undefined;
+  }
 }

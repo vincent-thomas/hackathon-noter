@@ -11,6 +11,8 @@ echo GEMINI_API_KEY=your-key > .env
 docker compose up
 ```
 
+For optional large-context compression, add `CONDENSE_API_KEY=ak_...` to `.env`. Condense is only called when derived memory exceeds the harness's inline budget; it compresses prompt context, never stored memory. API access and the `compress` capability must be enabled on the Condense account.
+
 Open http://localhost:3000. Tap the mic, talk, tap again. A single recording can contain information to remember, questions about existing memory, or both. The agent stores useful new information and speaks its answer; a capture without a question receives a short acknowledgement.
 
 The sign-in screen always asks for an email and a passkey. A new email silently creates an account; an existing email signs in—there are no passwords. Passkeys work on `localhost`; deployed environments must use HTTPS and configure:
@@ -133,6 +135,7 @@ When deploying into another Cloudflare account, replace `database_id` in `wrangl
 
 ```sh
 bunx wrangler secret put GEMINI_API_KEY
+bunx wrangler secret put CONDENSE_API_KEY # optional
 bunx wrangler d1 migrations apply noter-accounts --remote
 bun run cf:deploy
 ```

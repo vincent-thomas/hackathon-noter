@@ -9,6 +9,8 @@ query → read-only Pi agent → answer + accessed paths
 
 Set `GEMINI_API_KEY` in the environment or `.env`. `MEMORY_ROOT` selects the persistent user sandbox and defaults to `notes/cli`. `PI_MODEL` optionally overrides the default `gemini-3.5-flash-lite` model.
 
+Optionally set `CONDENSE_API_KEY` to compress accumulated memory that exceeds the normal inline prompt budget. The harness sends only the temporary prompt context to [Condense's direct `helene-1` compression endpoint](https://condense.chat/docs/reference/#ep-compress); it never replaces or modifies the persisted Markdown files. If compression fails or remains too large, the agent receives file paths and retrieves exact content with its normal memory tools.
+
 ## JSON CLI
 
 Every invocation writes exactly one JSON object to standard output. Errors also use JSON and return a nonzero exit status.
