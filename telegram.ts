@@ -1,6 +1,6 @@
 // TEMPORARY: no access control. Anyone who finds the bot can use it, and everything they send lands in user 1's notes.
 // Add an allowlist of Telegram user IDs before sharing the bot's username.
-import { converse, toVoiceNote } from "./server";
+import { converse, echoDelay, toVoiceNote } from "./server";
 import type { captureMemory } from "./harness";
 
 type TelegramDependencies = { capture?: typeof captureMemory };
@@ -58,6 +58,9 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
   }
   // ECHO=1: Telegram resends a file it already has by its ID, so no download, no Gemini, no ffmpeg.
   if (process.env.ECHO === "1") {
+    const stopRecording = await showRecording(chat);
+    await echoDelay();
+    stopRecording();
     await call("sendVoice", { chat_id: chat, voice: message.voice.file_id, reply_parameters: replyTo });
     console.log(`telegram: echoed the voice note back to chat ${chat}`);
     return;

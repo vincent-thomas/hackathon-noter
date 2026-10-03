@@ -100,14 +100,16 @@ test("a voice note gets a voice note back, as a reply", async () => {
   expect(await (form.get("voice") as Blob).text()).toBe("OGG-OUT");
 });
 
-test("ECHO=1 resends the voice note by its file ID without downloading it", async () => {
+test("ECHO=1 shows the indicator, pauses, and resends the voice note by its file ID", async () => {
   process.env.ECHO = "1";
-  const fetch = routes({ getUpdates: () => ok([voiceUpdate]), sendVoice: () => ok({}) });
+  const fetch = routes({ getUpdates: () => ok([voiceUpdate]), sendChatAction: () => ok(true), sendVoice: () => ok({}) });
   const spawn = spyOn(Bun, "spawn");
+  const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
 
   await pollOnce(0);
 
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls.map(([url]) => String(url).split("/").pop())).toEqual(["getUpdates", "sendChatAction", "sendVoice"]);
+  expect(sleep).toHaveBeenCalledTimes(1);
   expect(spawn).not.toHaveBeenCalled();
   expect(sent(callTo(fetch, "sendVoice")).body).toEqual({ chat_id: 42, voice: "F1", reply_parameters: { message_id: 3 } });
 });

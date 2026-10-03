@@ -132,6 +132,9 @@ export function toVoiceNote(wav: Bytes): Promise<Bytes> {
   return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
 }
 
+// A real reply takes seconds; this pause lets echo mode show the waiting indicators too.
+export const echoDelay = () => Bun.sleep(500 + Math.random() * 500);
+
 // Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
 export async function talk(req: Request, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   const recording = await req.arrayBuffer();
@@ -139,6 +142,7 @@ export async function talk(req: Request, capture: CaptureWorkflow = captureMemor
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
   if (process.env.ECHO === "1") {
     console.log(`echo: ${kb(recording)} of ${mimeType}`);
+    await echoDelay();
     return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   }
   try {
