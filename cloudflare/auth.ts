@@ -24,7 +24,7 @@ export async function authOptions(env: Env, input: unknown) {
   if (!user) {
     const userId = crypto.randomUUID();
     const options = await generateRegistrationOptions({
-      rpName: "Noter",
+      rpName: "notd",
       rpID: env.PASSKEY_RP_ID,
       userID: new TextEncoder().encode(userId),
       userName: email,

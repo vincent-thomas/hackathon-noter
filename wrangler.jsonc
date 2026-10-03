@@ -13,7 +13,7 @@
   },
   "vars": {
     "HARNESS_MODEL": "gemini-3.5-flash-lite",
-    "RESEND_FROM": "Noter <onboarding@resend.dev>"
+    "RESEND_FROM": "notd <onboarding@resend.dev>"
   },
   "d1_databases": [
     {
@@ -27,7 +27,7 @@
   "previews": {
     "vars": {
       "HARNESS_MODEL": "gemini-3.5-flash-lite",
-      "RESEND_FROM": "Noter <onboarding@resend.dev>"
+      "RESEND_FROM": "notd <onboarding@resend.dev>"
     },
     "d1_databases": [
       {
