@@ -8,14 +8,16 @@ You need a Gemini API key. Get one at https://aistudio.google.com/apikey.
 
 ```sh
 echo GEMINI_API_KEY=your-key > .env
-docker compose up --build
+docker compose up
 ```
 
 Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said and plays your voice back.
 
-## Develop without Docker
+The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
 
-Needs [Bun](https://bun.sh). The server restarts on every save:
+## Run without Docker
+
+Needs [Bun](https://bun.sh):
 
 ```sh
 GEMINI_API_KEY=your-key bun --watch server.ts

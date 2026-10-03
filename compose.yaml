@@ -1,6 +1,9 @@
 services:
   app:
-    build: .
+    image: oven/bun:1-alpine
+    working_dir: /app
+    volumes: [".:/app"]
+    command: bun --watch server.ts
     ports: ["3000:3000"]
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:?put GEMINI_API_KEY in .env}
