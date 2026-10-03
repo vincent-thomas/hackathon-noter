@@ -35,7 +35,7 @@ Ask a natural-language question across accumulated memory:
 bun run harness -- query "What do I need to discuss with Erik, and what do we know about the startup problem?"
 ```
 
-Queries are read-only. The query agent receives `list_memory`, `search_memory`, and `read_memory`, but not `write_memory`.
+Queries are read-only. The query agent receives `list_memory`, `search_memory`, and `read_memory`, but not `write_memory`. Answers do not expose source paths; `queryMemory()` returns the consulted paths separately in `accessedPaths` for logging and observability.
 
 ## Inspect or debug
 

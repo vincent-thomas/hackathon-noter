@@ -199,7 +199,7 @@ async function query(sandboxRoot: string, question: string): Promise<void> {
     throw new Error("GEMINI_API_KEY is required. Add it to .env or export it before running the harness.");
   }
   console.log("Agent searching memory…");
-  const answer = await queryMemory({
+  const result = await queryMemory({
     sandboxRoot,
     question,
     model: process.env.PI_MODEL,
@@ -208,7 +208,7 @@ async function query(sandboxRoot: string, question: string): Promise<void> {
       if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
     },
   });
-  console.log(`\n${answer}`);
+  console.log(`\n${result.answer}`);
 }
 
 if (import.meta.main) await main();

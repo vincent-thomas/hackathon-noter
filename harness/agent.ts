@@ -34,12 +34,17 @@ When processing a capture:
 
 export const MEMORY_QUERY_SYSTEM_PROMPT = `You answer questions using the user's external memory.
 
-Use list_memory, search_memory, and read_memory to find relevant information. The filesystem is the only source of truth. Do not claim facts that are absent from it. Clearly say when the stored memory is insufficient or contradictory. Give a concise, useful answer and cite supporting virtual file paths. You have read-only access and cannot create or alter memory.`;
+Use list_memory, search_memory, and read_memory to find relevant information. The filesystem is the only source of truth. Do not claim facts that are absent from it. Clearly say when the stored memory is insufficient or contradictory. Give a concise, useful answer. Do not include source citations, file paths, or a Sources section in the answer; the harness tracks provenance separately. You have read-only access and cannot create or alter memory.`;
 
 export type AgentTraceEvent =
   | { type: "tool_start"; tool: string; input: unknown }
   | { type: "tool_end"; tool: string; isError: boolean }
   | { type: "assistant"; text: string };
+
+export type MemoryQueryResult = {
+  answer: string;
+  accessedPaths: string[];
+};
 
 export function resolveGoogleModel(modelId: string) {
   const registered = getModels("google").find((candidate) => candidate.id === modelId);
@@ -120,10 +125,11 @@ export async function queryMemory(options: {
   question: string;
   model?: string;
   onEvent?: (event: AgentTraceEvent) => void;
-}): Promise<string> {
+}): Promise<MemoryQueryResult> {
   if (!options.question.trim()) throw new Error("query cannot be empty");
   const harness = new MemoryHarness(options.sandboxRoot);
   const tools = createMemoryTools(harness).filter((tool) => tool.name !== "write_memory");
+  const accessedPaths = new Set<string>();
   const cwd = resolve(import.meta.dir, "..");
   const loader = new DefaultResourceLoader({
     cwd,
@@ -153,6 +159,7 @@ export async function queryMemory(options: {
       options.onEvent?.({ type: "tool_start", tool: event.toolName, input: event.args });
     } else if (event.type === "tool_execution_end") {
       options.onEvent?.({ type: "tool_end", tool: event.toolName, isError: event.isError });
+      if (!event.isError) trackAccessedPaths(event.toolName, event.result?.details, accessedPaths);
     }
   });
 
@@ -162,9 +169,25 @@ export async function queryMemory(options: {
     if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
     const response = session.getLastAssistantText() ?? "";
     options.onEvent?.({ type: "assistant", text: response });
-    return response;
+    return { answer: response, accessedPaths: [...accessedPaths].sort() };
   } finally {
     unsubscribe();
     session.dispose();
   }
+}
+
+export function trackAccessedPaths(tool: string, details: unknown, paths: Set<string>): void {
+  if (tool === "read_memory" && isObject(details) && typeof details.path === "string") {
+    paths.add(details.path);
+  }
+  if ((tool === "search_memory" || tool === "list_memory") && isObject(details) && Array.isArray(details.files)) {
+    for (const file of details.files) {
+      if (typeof file === "string") paths.add(file);
+      else if (isObject(file) && typeof file.path === "string") paths.add(file.path);
+    }
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
