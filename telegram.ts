@@ -26,10 +26,13 @@ function describe(message: any): string {
 }
 
 async function download(fileId: string): Promise<ArrayBuffer> {
+  const start = performance.now();
   const { file_path } = await call("getFile", { file_id: fileId });
   const res = await fetch(`${api("file/")}/${file_path}`);
   if (!res.ok) throw new Error(`telegram download ${res.status}`);
-  return res.arrayBuffer();
+  const audio = await res.arrayBuffer();
+  console.log(`telegram: downloaded ${Math.round(audio.byteLength / 1024)} KB in ${Math.round(performance.now() - start)} ms`);
+  return audio;
 }
 
 /** Runs `task` every `ms` until the returned function is called. Failures go to `onError`. */
@@ -103,7 +106,11 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
     form.append("chat_id", String(chat));
     form.append("reply_parameters", JSON.stringify(replyTo));
     form.append("voice", new Blob([await toVoiceNote(reply)], { type: "audio/ogg" }), "reply.ogg");
-    return () => call("sendVoice", form);
+    return async () => {
+      const start = performance.now();
+      await call("sendVoice", form);
+      console.log(`telegram: uploaded the voice note in ${Math.round(performance.now() - start)} ms`);
+    };
   });
   console.log(`telegram: ${echo ? "echoed the voice note back" : "sent a voice note"} to chat ${chat}`);
 }
