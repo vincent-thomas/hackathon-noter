@@ -9,12 +9,18 @@
   .orb canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 80vmin; height: 80vmin; pointer-events: none; }
   button { position: relative; display: block; width: 44vmin; height: 44vmin; border: 0; border-radius: 50%; font-size: 18vmin; background: #1f6feb; cursor: pointer; }
   .listening { background: #da3633; }
-  .thinking { opacity: .5; }
+  .dots { display: none; justify-content: center; gap: 3vmin; }
+  .dots i { width: 4vmin; height: 4vmin; border-radius: 50%; background: #fff; animation: pulse 1.2s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay: .15s; }
+  .dots i:nth-child(3) { animation-delay: .3s; }
+  .thinking .icon { display: none; }
+  .thinking .dots { display: flex; }
+  @keyframes pulse { 0%, 80%, 100% { opacity: .3; scale: .7; } 40% { opacity: 1; scale: 1; } }
   #status { position: relative; margin: 1.5rem 0 0; max-width: 32rem; text-align: center; font-size: .85rem; opacity: .6; }
 </style>
 <div class="orb">
   <canvas id="spectrum"></canvas>
-  <button id="mic">🎤</button>
+  <button id="mic"><span class="icon">🎤</span><span class="dots"><i></i><i></i><i></i></span></button>
 </div>
 <p id="status">Tap to talk</p>
 <script>
@@ -70,6 +76,7 @@
       fadeOut();
       stream.getTracks().forEach((t) => t.stop());
       mic.className = "thinking";
+      status.textContent = "Thinking…";
       const res = await fetch("/api/talk", {
         method: "POST",
         headers: { "content-type": recorder.mimeType, accept: "audio/ogg" },
