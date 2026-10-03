@@ -3,6 +3,9 @@ import { poll } from "./telegram";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
+// Blob and Response only take buffers over a plain ArrayBuffer, which is all we ever make.
+type Bytes = Buffer<ArrayBuffer>;
+
 async function gemini(model: string, body: object): Promise<any[]> {
   const res = await fetch(`${API}/${model}:generateContent`, {
     method: "POST",
@@ -21,7 +24,7 @@ async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string>
   return parts.find((p) => p.audioTranscription)?.audioTranscription.text ?? "";
 }
 
-async function speak(text: string): Promise<Buffer> {
+async function speak(text: string): Promise<Bytes> {
   const parts = await gemini("gemini-3.8-flash-tts", {
     contents: [{ parts: [{ text }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
@@ -33,7 +36,7 @@ async function speak(text: string): Promise<Buffer> {
 // Users don't exist yet; every request belongs to user 1.
 const USER_ID = 1;
 
-async function run(cmd: string[], input: string | Buffer): Promise<Buffer> {
+async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
   const proc = Bun.spawn(cmd, { stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
   if (code !== 0) throw new Error(`${cmd[0]} exited ${code}: ${err}`);
@@ -63,7 +66,7 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
 }
 
 // Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
-export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ transcript: string; reply: Buffer }> {
+export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ transcript: string; reply: Bytes }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
   const answer = transcript ? await timed("harness", harness(transcript), JSON.stringify) : "I didn't catch that.";
@@ -72,7 +75,7 @@ export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ 
 }
 
 // WhatsApp and Telegram only show OGG/Opus as a voice note.
-export function toVoiceNote(wav: Buffer): Promise<Buffer> {
+export function toVoiceNote(wav: Bytes): Promise<Bytes> {
   return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
 }
 

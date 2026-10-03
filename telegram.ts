@@ -1,12 +1,16 @@
 // TEMPORARY: no access control. Anyone who finds the bot can use it, and everything they send lands in user 1's notes.
 // Add an allowlist of Telegram user IDs before sharing the bot's username.
+import { converse, toVoiceNote } from "./server";
 
-async function call(method: string, body: object = {}): Promise<any> {
-  const res = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+const api = (path = "") => `https://api.telegram.org/${path}bot${process.env.TELEGRAM_BOT_TOKEN}`;
+
+async function call(method: string, body: object | FormData = {}): Promise<any> {
+  const res = await fetch(
+    `${api()}/${method}`,
+    body instanceof FormData
+      ? { method: "POST", body }
+      : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+  );
   const json: any = await res.json();
   if (!json.ok) throw new Error(`telegram ${method}: ${json.description}`);
   return json.result;
@@ -18,10 +22,41 @@ function describe(message: any): string {
   return `${what} from ${from} in chat ${message.chat.id}`;
 }
 
+async function download(fileId: string): Promise<ArrayBuffer> {
+  const { file_path } = await call("getFile", { file_id: fileId });
+  const res = await fetch(`${api("file/")}/${file_path}`);
+  if (!res.ok) throw new Error(`telegram download ${res.status}`);
+  return res.arrayBuffer();
+}
+
 async function handle(message: any): Promise<void> {
   console.log(`telegram: ${describe(message)}`);
-  await call("sendMessage", { chat_id: message.chat.id, text: "Send me a voice note." });
-  console.log(`telegram: asked chat ${message.chat.id} for a voice note`);
+  const chat = message.chat.id;
+  const replyTo = { message_id: message.message_id };
+  if (!message.voice) {
+    await call("sendMessage", { chat_id: chat, text: "Send me a voice note." });
+    console.log(`telegram: asked chat ${chat} for a voice note`);
+    return;
+  }
+  // ECHO=1: Telegram resends a file it already has by its ID, so no download, no Gemini, no ffmpeg.
+  if (process.env.ECHO === "1") {
+    await call("sendVoice", { chat_id: chat, voice: message.voice.file_id, reply_parameters: replyTo });
+    console.log(`telegram: echoed the voice note back to chat ${chat}`);
+    return;
+  }
+  try {
+    const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg");
+    const form = new FormData();
+    form.append("chat_id", String(chat));
+    form.append("reply_parameters", JSON.stringify(replyTo));
+    form.append("voice", new Blob([await toVoiceNote(reply)], { type: "audio/ogg" }), "reply.ogg");
+    await call("sendVoice", form);
+    console.log(`telegram: sent a voice note to chat ${chat}`);
+  } catch (err) {
+    // Details stay in the logs: without access control, a stranger could be reading the chat.
+    await call("sendMessage", { chat_id: chat, text: "Something broke, check the logs." });
+    throw err;
+  }
 }
 
 // Waits up to 50 s for new messages. Telegram treats everything below the offset as delivered,
