@@ -22,7 +22,7 @@ type Part = { text?: string; functionCall?: { name: string; args?: Record<string
 type Content = { role: "user" | "model"; parts: Part[] };
 
 async function generate(env: Env, body: object): Promise<{ content: Content; parts: Part[] }> {
-  const model = env.HARNESS_MODEL || "gemini-3.8-flash";
+  const model = env.HARNESS_MODEL || "gemini-3.5-flash-lite";
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
