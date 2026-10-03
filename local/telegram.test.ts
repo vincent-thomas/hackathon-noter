@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { pollOnce, repeat } from "./telegram";
-import type { captureMemory } from "./harness";
+import type { captureMemory } from "../harness";
 
 const ok = (result: unknown) => Response.json({ ok: true, result });
 const proc = (stdout: string) =>
