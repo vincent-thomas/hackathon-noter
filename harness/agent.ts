@@ -52,6 +52,8 @@ export type MemoryQueryResult = {
   accessedPaths: string[];
 };
 
+const MODEL = "gemini-3.5-flash-lite";
+
 export function resolveGoogleModel(modelId: string) {
   const registered = getModels("google").find((candidate) => candidate.id === modelId);
   if (registered) return registered;
@@ -59,6 +61,11 @@ export function resolveGoogleModel(modelId: string) {
     const flash = getModels("google").find((candidate) => candidate.id === "gemini-flash-latest");
     if (!flash) throw new Error("Pi has no Google Flash model template");
     return { ...flash, id: modelId, name: "Gemini 3.8 Flash" };
+  }
+  if (modelId === "gemini-3.5-flash-lite") {
+    const lite = getModels("google").find((candidate) => candidate.id === "gemini-flash-lite-latest");
+    if (!lite) throw new Error("Pi has no Google Flash Lite model template");
+    return { ...lite, id: modelId, name: "Gemini 3.5 Flash Lite" };
   }
   throw new Error(`unknown Google model: ${modelId}`);
 }
@@ -113,7 +120,7 @@ export async function processCapture(options: {
     appendSystemPrompt: [],
   });
   await loader.reload();
-  const modelId = options.model ?? "gemini-3.8-flash";
+  const modelId = options.model ?? MODEL;
   const model = resolveGoogleModel(modelId);
 
   const { session } = await createAgentSession({
@@ -183,7 +190,7 @@ export async function queryMemory(options: {
 
   const { session } = await createAgentSession({
     cwd,
-    model: resolveGoogleModel(options.model ?? "gemini-3.8-flash"),
+    model: resolveGoogleModel(options.model ?? MODEL),
     thinkingLevel: "low",
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(),

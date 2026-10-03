@@ -9,6 +9,12 @@ test("uses Gemini 3.8 Flash through Pi's Google Flash transport", () => {
   expect(model.api).toBe("google-generative-ai");
 });
 
+test("uses Gemini 3.5 Flash Lite through Pi's Google Flash Lite transport", () => {
+  const model = resolveGoogleModel("gemini-3.5-flash-lite");
+  expect(model.id).toBe("gemini-3.5-flash-lite");
+  expect(model.provider).toBe("google");
+});
+
 test("rejects unknown custom Google models", () => {
   expect(() => resolveGoogleModel("made-up-model")).toThrow("unknown Google model");
 });

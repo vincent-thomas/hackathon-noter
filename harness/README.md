@@ -7,7 +7,7 @@ capture → backend-owned /inbox file → Pi agent → derived memory
 query → read-only Pi agent → answer + accessed paths
 ```
 
-Set `GEMINI_API_KEY` in the environment or `.env`. `MEMORY_ROOT` selects the persistent user sandbox and defaults to `notes/cli`. `PI_MODEL` optionally overrides the default `gemini-3.8-flash` model.
+Set `GEMINI_API_KEY` in the environment or `.env`. `MEMORY_ROOT` selects the persistent user sandbox and defaults to `notes/cli`. `PI_MODEL` optionally overrides the default `gemini-3.5-flash-lite` model.
 
 ## JSON CLI
 
