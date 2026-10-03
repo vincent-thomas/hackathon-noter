@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:assets": "mkdir -p dist && cp index.html dist/index.html && cp node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js dist/auth-client.js",
+    "cf:dev": "bun run build:assets && wrangler dev",
+    "cf:types": "wrangler types",
+    "cf:check": "tsc -p tsconfig.worker.json && bun run build:assets && wrangler deploy --dry-run",
+    "cf:deploy": "bun run build:assets && wrangler deploy",
     "harness": "bun harness/cli.ts",
     "test": "bun test"
   },
@@ -14,7 +19,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261003.1",
     "@types/bun": "^1.4.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.147.0"
   }
 }

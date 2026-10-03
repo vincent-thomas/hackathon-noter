@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "noter",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-03",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "HARNESS_MODEL": "gemini-3.8-flash"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "noter-accounts",
+      "database_id": "45d7fa80-0f2c-4434-8a90-7062caa9b10f",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEMORY", "bucket_name": "noter-memory" }]
+}
