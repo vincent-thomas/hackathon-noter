@@ -70,7 +70,11 @@
       fadeOut();
       stream.getTracks().forEach((t) => t.stop());
       mic.className = "thinking";
-      const res = await fetch("/api/talk", { method: "POST", headers: { "content-type": recorder.mimeType }, body: new Blob(chunks) });
+      const res = await fetch("/api/talk", {
+        method: "POST",
+        headers: { "content-type": recorder.mimeType, accept: "audio/ogg" },
+        body: new Blob(chunks),
+      });
       mic.className = "";
       if (!res.ok) return (status.textContent = await res.text());
       status.textContent = "You said: " + decodeURIComponent(res.headers.get("x-transcript"));

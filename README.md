@@ -33,7 +33,7 @@ WhatsApp and Telegram send and play voice notes as OGG/Opus. Ask `/api/talk` for
 curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/ogg' localhost:3000/api/talk -o reply.ogg
 ```
 
-The web page doesn't ask for OGG, so it keeps getting WAV.
+The web page asks for OGG too.
 
 ## Debugging
 
