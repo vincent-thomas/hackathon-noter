@@ -34,7 +34,7 @@ async function transcribe(env: Env, audio: ArrayBuffer, mimeType: string) {
 }
 
 async function speak(env: Env, text: string) {
-  const parts = await gemini(env, "gemini-3.8-flash-tts", {
+  const parts = await gemini(env, "gemini-3.8-flash-lite-tts", {
     contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"] },
   });
   const encoded = parts.find((part) => part.inlineData)?.inlineData.data;
