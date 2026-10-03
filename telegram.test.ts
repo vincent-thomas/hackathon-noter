@@ -73,7 +73,7 @@ test("a voice note gets a voice note back, as a reply", async () => {
     getFile: () => ok({ file_path: "voice/file_1.oga" }),
     "/file/bot": () => new Response("OGG-IN"),
     "gemini-3.5-transcribe": () => Response.json({ candidates: [{ content: { parts: [{ audioTranscription: { text: "buy milk" } }] } }] }),
-    "gemini-3.8-flash-tts": () => Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: "V0FW" } }] } }] }),
+    "gemini-3.8-flash-lite-tts": () => Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: "V0FW" } }] } }] }),
     sendVoice: () => ok({}),
   });
   const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OGG-OUT"));

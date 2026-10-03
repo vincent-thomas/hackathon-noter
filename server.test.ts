@@ -35,7 +35,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
   const [stt, tts] = gemini.mock.calls;
   expect(stt[0]).toContain("gemini-3.5-transcribe:generateContent");
   expect(sent(stt).contents[0].parts[0].inlineData).toEqual({ mimeType: "audio/webm", data: "YWJj" });
-  expect(tts[0]).toContain("gemini-3.8-flash-tts:generateContent");
+  expect(tts[0]).toContain("gemini-3.8-flash-lite-tts:generateContent");
   expect(sent(tts)).toEqual({
     contents: [{ parts: [{ text: "Processed." }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
@@ -199,7 +199,7 @@ test("speakStream yields whole 16-bit samples from Gemini's event stream as they
   const chunks: number[][] = [];
   for await (const chunk of speakStream("hello")) chunks.push([...chunk]);
 
-  expect(String(tts.mock.calls[0][0])).toContain("gemini-3.8-flash-tts:streamGenerateContent?alt=sse");
+  expect(String(tts.mock.calls[0][0])).toContain("gemini-3.8-flash-lite-tts:streamGenerateContent?alt=sse");
   expect(chunks).toEqual([[1, 2], [3, 4], [5, 6]]);
 });
 
@@ -228,5 +228,5 @@ test("a TTS failure before any audio still gets a 502", async () => {
   const res = await streamRequest();
 
   expect(res.status).toBe(502);
-  expect(await res.text()).toContain("gemini-3.8-flash-tts 429: quota");
+  expect(await res.text()).toContain("gemini-3.8-flash-lite-tts 429: quota");
 });

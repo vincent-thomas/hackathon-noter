@@ -30,7 +30,8 @@ async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string>
   return parts.find((p) => p.audioTranscription)?.audioTranscription.text ?? "";
 }
 
-const TTS = "gemini-3.8-flash-tts";
+// The lite model streams about twice as fast: first audio in ~0.7 s instead of ~1.2 s.
+const TTS = "gemini-3.8-flash-lite-tts";
 const ttsRequest = (text: string) => ({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"] } });
 
 async function speak(text: string): Promise<Bytes> {
