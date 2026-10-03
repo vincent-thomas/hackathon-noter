@@ -4,25 +4,27 @@
   "type": "module",
   "scripts": {
     "build:assets": "mkdir -p dist && cp index.html manifest.webmanifest icon-180.png icon-512.png dist/ && cp node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js dist/auth-client.js",
+    "dev": "node dev.mjs",
     "cf:dev": "bun run build:assets && wrangler dev",
     "cf:types": "wrangler types",
     "cf:check": "tsc -p tsconfig.worker.json && bun run build:assets && wrangler deploy --dry-run",
     "cf:deploy": "bun run build:assets && wrangler deploy",
     "cf:preview": "bun run build:assets && wrangler preview",
-    "harness": "bun harness/cli.ts",
     "test": "bun test"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.73.1",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.3",
+    "lamejs": "1.2.1",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261003.1",
     "@types/bun": "^1.4.2",
+    "miniflare": "5.20261001.0-alpha",
     "typescript": "^7.0.2",
+    "undici": "7.30.0",
     "wrangler": "^4.147.0"
   }
 }

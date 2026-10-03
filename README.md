@@ -45,38 +45,34 @@ The Cloudflare Worker is the production application boundary. It serves the stat
 
 | Technology | Role |
 | --- | --- |
-| TypeScript and Bun | Application language, local server, CLI, tests, and package runner |
+| TypeScript and Bun | Application language, tests, and package runner |
 | Cloudflare Workers and Static Assets | Production API runtime and PWA hosting |
 | Cloudflare D1 | Users, passkey credentials, challenges, sessions, settings, briefing delivery state, and Telegram links |
 | Cloudflare R2 | Persistent per-user Markdown memory |
 | Gemini API | Voice transcription, agent reasoning, query answers, briefings, and browser speech synthesis |
-| Pi coding-agent SDK | Agent loop and typed tool execution in the local filesystem harness |
 | WebAuthn via SimpleWebAuthn | Passwordless passkey registration and authentication |
 | Zod | Request, tool-input, and Markdown-frontmatter validation |
 | Resend | Delivery of morning briefing email |
 | Telegram Bot API | Text and voice capture through a shared production webhook |
 | Wrangler | Local Worker development, migrations, secrets, previews, and deployment |
-| Docker Compose | Optional local Bun-server development environment |
+| Node.js | Local development server (`dev.mjs`) that runs the Worker and works behind an egress proxy |
+| lamejs | MP3 encoding of spoken replies, so Telegram shows them as voice notes; Workers can't run ffmpeg |
 
 ## Run it
 
 You need a Gemini API key. Get one at https://aistudio.google.com/apikey.
 
 ```sh
-echo GEMINI_API_KEY=your-key > .env
-docker compose up
+echo GEMINI_API_KEY=your-key > .dev.vars
+bunx wrangler d1 migrations apply noter-accounts --local
+bun run dev
 ```
 
-Open http://localhost:3000. Tap the mic, talk, tap again. A single recording can contain information to remember, questions about existing memory, or both. The agent stores useful new information and speaks its answer; a capture without a question receives a short acknowledgement.
+Open http://localhost:8787. Hold the circle, talk, and let go. A single recording can contain information to remember, questions about existing memory, or both. The agent stores useful new information and speaks its answer; a capture without a question receives a short acknowledgement. Within one page session, follow-ups like "actually, change that to 4 o'clock" or "say that again?" work, because the last six exchanges are kept.
 
-The sign-in screen always asks for an email and a passkey. A new email silently creates an account; an existing email signs in—there are no passwords. Passkeys work on `localhost`; deployed environments must use HTTPS and configure:
+The sign-in screen always asks for an email and a passkey. A new email silently creates an account; an existing email signs in—there are no passwords. Passkeys work on `localhost` and on HTTPS; the relying-party ID and origin come from the request URL.
 
-```sh
-PASSKEY_RP_ID=noter.example.com
-PASSKEY_ORIGIN=https://noter.example.com
-```
-
-The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
+`bun run dev` runs the Worker locally in Cloudflare's runtime, with D1 and R2 kept in `.wrangler/state`, and reloads when you save. Unlike plain `wrangler dev`, it sends the Worker's outgoing requests, WebSockets included, through Node, so it also works behind an egress proxy: set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1`.
 
 ## Authenticated API
 
@@ -93,7 +89,8 @@ The capture and query endpoints require the `noter_session` HttpOnly cookie issu
 | `POST /api/auth/logout` | Session | Revoke the current session and clear its cookie. |
 | `POST /api/capture/text` | Session | Preserve text in `/inbox`, process it, and return created and accessed paths plus a response. |
 | `POST /api/query` | Session | Answer a question from stored memory without creating a capture. |
-| `POST /api/talk` | Session | Transcribe uploaded audio, process capture and query content together, and return synthesized audio. |
+| `POST /api/talk` | Session | Transcribe uploaded audio, process capture and query content together, and return synthesized audio: WAV by default, streamed raw PCM with `Accept: audio/l16`. |
+| `GET /api/talk/live` | Session | WebSocket: audio streams in while the user talks and is transcribed live; the reply streams back on the same socket. |
 | `GET /api/settings/briefing` | Session | Read morning-briefing settings. |
 | `POST /api/settings/briefing` | Session | Enable or disable briefings and save the user's IANA timezone. |
 | `GET /api/settings/telegram` | Session | Report whether this account has a linked Telegram chat. |
@@ -105,7 +102,7 @@ The capture and query endpoints require the `noter_session` HttpOnly cookie issu
 Capture unstructured text:
 
 ```sh
-curl -sS localhost:3000/api/capture/text \
+curl -sS localhost:8787/api/capture/text \
   -H 'content-type: application/json' \
   -d '{"text":"Ask Erik about deployment tomorrow"}'
 ```
@@ -119,7 +116,7 @@ The response includes the immutable inbox capture, derived paths, files consulte
 Query accumulated memory:
 
 ```sh
-curl -sS localhost:3000/api/query \
+curl -sS localhost:8787/api/query \
   -H 'content-type: application/json' \
   -d '{"question":"What do I need to discuss with Erik?"}'
 ```
@@ -132,53 +129,31 @@ Each response is scoped to the signed-in account. An unauthenticated request ret
 
 ## Memory
 
-Each web account has an isolated persistent Markdown filesystem:
+Each account has an isolated Markdown filesystem in R2, namespaced by user ID:
 
 ```text
-notes/users/<user-id>/
-├── inbox/
-├── tasks/
-├── events/
-├── memory/
-└── briefings/
+/inbox/  /tasks/  /events/  /memory/  /briefings/
 ```
 
-Account, passkey, challenge, and session state is stored in `notes/accounts.sqlite`. The backend creates immutable raw files under `/inbox`. The Pi agent receives only the typed `read_memory`, `list_memory`, `search_memory`, and create-only `write_memory` tools. It has no shell or raw filesystem tool and cannot write to `/inbox`.
+Account, passkey, challenge, session and conversation state lives in D1. The backend creates immutable raw files under `/inbox`. The agent receives only the typed `read_memory`, `list_memory`, `search_memory`, and create-only `write_memory` tools; when all of memory fits in its prompt, it gets only `write_memory`, since looking anything up would only cost time. It has no shell or raw storage tool and cannot write to `/inbox`. Empty memories and exact copies of an existing memory are refused.
 
-Telegram requires a linked passkey account and uses that account's `notes/users/<user-id>/` memory. Unlinked chats cannot invoke Gemini or the harness.
+Telegram requires a linked passkey account and uses that account's memory. Unlinked chats cannot invoke Gemini or the agent.
 
-Programmatic capture and query APIs remain available under [`harness/`](harness/README.md).
+## Voice
 
-## Voice notes
+The page records while you hold the circle and streams the audio over `GET /api/talk/live`, so the transcript is ready about 0.4 s after you let go. The reply streams back as raw 24 kHz mono 16-bit PCM and plays as it arrives. If the live connection fails, the page uploads the recording to `POST /api/talk` instead, with the same streamed reply.
 
-WhatsApp and Telegram send and play voice notes as OGG/Opus. Ask `/api/talk` for `audio/ogg` and the reply comes back in that format, converted by ffmpeg. To try a round trip without either app:
-
-```sh
-curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/ogg' localhost:3000/api/talk -o reply.ogg
-```
-
-Ask for `audio/l16` instead and the reply streams as raw 24 kHz mono 16-bit PCM while Gemini generates it. The first audio arrives about 1 s after the answer is ready, instead of 3–4 s for the whole file:
-
-```sh
-curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/l16' localhost:3000/api/talk -o reply.pcm
-```
-
-The web page asks for this stream and plays it as it arrives.
+Telegram voice notes get a voice note back, encoded as MP3, which Telegram shows as a voice message. Text gets text.
 
 ## Telegram
 
 1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`.
-2. Configure `TELEGRAM_BOT_TOKEN` for the runtime (in `.env` locally or as a Worker secret in production).
+2. Configure `TELEGRAM_BOT_TOKEN` as a Worker secret (or in `.dev.vars` locally).
 3. Sign in to Noter, open Settings, and select **Generate code** under Telegram.
 4. Send `/link CODE` to the bot within 10 minutes.
 5. Send your bot a voice note or text message. It uses the same memory as your web account and answers in kind.
 
-With `ECHO=1` the bot sends your own voice note or text straight back after a short pause, without calling Gemini. If something breaks, the chat only gets "Something broke, check the logs." and the details go to `docker compose logs`.
-
-The two runtimes receive Telegram updates differently:
-
-- The local Bun server polls Telegram, so local development does not need a public URL.
-- The deployed Worker uses one shared `POST /api/telegram/webhook` for the bot. Generating a link code configures that HTTPS webhook with `setWebhook`. Telegram signs deliveries with `TELEGRAM_WEBHOOK_SECRET`; the Worker then maps the incoming chat ID to a Noter user in D1. It does **not** register one webhook per user.
+The Worker receives Telegram updates on one shared `POST /api/telegram/webhook`. Generating a link code configures that HTTPS webhook with `setWebhook`. Telegram signs deliveries with `TELEGRAM_WEBHOOK_SECRET`; the Worker then maps the incoming chat ID to a Noter user in D1. It does **not** register one webhook per user. A webhook needs a public URL, so to try the bot against a local Worker, expose it through a tunnel. If something breaks, the chat only gets an error line and the details go to the Worker logs.
 
 For Cloudflare, configure both secrets before generating a production link code:
 
@@ -190,18 +165,6 @@ bunx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 Keep the bot token and webhook secret private. Whoever has the bot token controls the bot; if it leaks, send `/revoke` to BotFather and replace the Worker secret.
 
 An unlinked Telegram chat receives linking instructions and cannot call Gemini or access memory. Link codes are single-use, expire after 10 minutes, and require an authenticated Noter session to create.
-
-## Debugging
-
-To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and restart with `docker compose up`. The server then plays your recording back without calling Gemini.
-
-## Run without Docker
-
-Needs [Bun](https://bun.sh). Voice-note conversion also needs `ffmpeg`:
-
-```sh
-GEMINI_API_KEY=your-key bun --watch server.ts
-```
 
 ## Deploy to Cloudflare Workers
 
@@ -225,14 +188,9 @@ bunx wrangler d1 migrations apply noter-accounts --remote
 bun run cf:deploy
 ```
 
-For local `workerd` development, keep `GEMINI_API_KEY` in `.env` and run:
+For local development, see [Run it](#run-it).
 
-```sh
-bunx wrangler d1 migrations apply noter-accounts --local
-bun run cf:dev
-```
-
-The Worker serves browser speech as WAV directly because Workers cannot spawn `ffmpeg`. The Bun server remains the Telegram/OGG runtime.
+Encoding a Telegram voice reply as MP3 takes about 60–190 ms of CPU, more than the Workers free plan's 10 ms per request, so voice replies need the Workers Paid plan.
 
 ### Morning briefings
 
@@ -262,7 +220,7 @@ The user enters an email and performs one passkey ceremony. If the email is new,
 
 Each capture first becomes an immutable Markdown document under `/inbox`. The agent has four narrow tools—`read_memory`, `list_memory`, `search_memory`, and `write_memory`—rather than shell or unrestricted filesystem access. Search is deterministic and grep-like, frontmatter is validated with Zod, and writes are atomic create-only operations. The agent cannot write to `/inbox`, overwrite a path, edit, move, or delete a file. It may produce zero, one, or several derived files under `/tasks`, `/events`, or `/memory`, and the query response separately reports which paths were accessed for provenance without putting source citations in the user-facing answer.
 
-Production implements the same logical contract over R2, with objects namespaced by user. The standalone [`harness`](harness/README.md) provides the filesystem-backed CLI and TypeScript API for programmatic use and testing.
+Production implements the same logical contract over R2, with objects namespaced by user.
 
 ### Scheduled morning briefings
 
@@ -286,7 +244,7 @@ Gemini is mocked in the tests, so no key is needed.
 
 ## Troubleshooting
 
-- **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `server.ts`. A `403` means the key is wrong.
-- **The page shows a Pi or Gemini error.** Check that `GEMINI_API_KEY` is available to both the transcription calls and the memory agent.
-- **Passkey creation or sign-in fails.** Open the app at exactly `PASSKEY_ORIGIN`. Outside localhost, HTTPS is required and `PASSKEY_RP_ID` must match the site's domain.
+- **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `gemini.ts`. A `403` means the key is wrong.
+- **The page shows a Gemini error.** Check that `GEMINI_API_KEY` is set: in `.dev.vars` locally, as a Worker secret in production.
+- **Passkey creation or sign-in fails.** Outside localhost, HTTPS is required, and a passkey only works on the domain it was created on.
 - **The mic doesn't start.** Browsers only allow the microphone on `localhost` or HTTPS. Open the page at `localhost`, not at your LAN IP.

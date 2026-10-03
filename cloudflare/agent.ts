@@ -1,13 +1,6 @@
 import type { Env } from "./types";
 import { WorkerMemory } from "./memory";
-
-const CAPTURE_SYSTEM = `You maintain the user's external memory.
-
-The user gives the system unstructured transcripts containing thoughts, tasks, facts, ideas, plans, observations, questions, and mixtures of these. The /inbox directory contains immutable raw source captures. Everything outside /inbox is derived memory. Existing files are immutable and write_memory is create-only.
-
-For each capture, retain information with future value and answer any questions it contains. Search memory when context may help. Use /tasks for actionable commitments, /events for time-associated information, and /memory for other durable context. Create separate files for meaningfully separate information, but avoid redundant or low-value memory. Preserve uncertainty. Never invent facts. If new information changes an older memory, create a new file describing the update. Every write needs a unique id and current offset-aware ISO timestamp. End with a concise user-facing response. Never include file paths or a Sources section.`;
-
-const QUERY_SYSTEM = `Answer questions using the user's external memory. Use the memory tools to find relevant information. Stored memory is the only source of truth. Say when it is insufficient or contradictory. Be concise. Never include citations, file paths, or a Sources section. You have read-only access.`;
+import { allInlined, capturePrompt, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, type Turn } from "../harness/prompts";
 
 const BRIEFING_SYSTEM = `Create a concise morning briefing from the user's external memory. Prioritize commitments, time-sensitive plans, open questions, and context useful today. Synthesize rather than dumping notes. Preserve uncertainty and contradictions. Do not invent dates or facts. Do not include source paths, citations, greetings, or a Sources section. Use short Markdown sections and bullets that scan well in email. If nothing is relevant, say so plainly.`;
 
@@ -35,11 +28,13 @@ async function generate(env: Env, body: object): Promise<{ content: Content; par
   return { content, parts: content.parts };
 }
 
-async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: string, writable: boolean) {
+const READ_ONLY = ["read_memory", "list_memory", "search_memory"];
+
+async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: string, allowed: string[]) {
   const contents: Content[] = [{ role: "user", parts: [{ text: prompt }] }];
   const accessed = new Set<string>();
   const created: string[] = [];
-  const tools = writable ? declarations : declarations.filter((tool) => tool.name !== "write_memory");
+  const tools = declarations.filter((tool) => allowed.includes(tool.name));
 
   for (let turn = 0; turn < 12; turn++) {
     const result = await generate(env, {
@@ -69,7 +64,7 @@ async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: 
         } else if (call.name === "search_memory") {
           output = await memory.search(call.args ?? {});
           for (const file of (output as { files: Array<{ path: string }> }).files) accessed.add(file.path);
-        } else if (call.name === "write_memory" && writable) {
+        } else if (call.name === "write_memory" && allowed.includes("write_memory")) {
           output = await memory.write(call.args as any);
           created.push((output as { path: string }).path);
         } else throw new Error(`unknown tool: ${call.name}`);
@@ -83,26 +78,45 @@ async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: 
   throw new Error("memory agent exceeded its tool-call limit");
 }
 
-export async function captureMemory(env: Env, userId: string, transcript: string, source: "voice" | "telegram" | "text") {
+const RECENT_TURNS = 6;
+
+async function recentTurns(env: Env, userId: string, conversation: string): Promise<Turn[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT said, answered FROM conversation_turns WHERE user_id = ? AND conversation = ? ORDER BY id DESC LIMIT ?",
+  ).bind(userId, conversation, RECENT_TURNS).all<Turn>();
+  return results.reverse();
+}
+
+export async function captureMemory(
+  env: Env,
+  userId: string,
+  transcript: string,
+  source: "voice" | "telegram" | "text",
+  conversation?: string,
+) {
   const memory = new WorkerMemory(env.MEMORY, userId);
   const capture = await memory.createInbox(transcript, source);
-  const existing = (await memory.files()).filter((file) => !file.path.startsWith("/inbox/") && file.path !== capture.path);
-  const chars = existing.reduce((sum, file) => sum + file.content.length, 0);
-  const context = chars <= 20_000
-    ? existing.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n") || "none yet"
-    : existing.map((file) => file.path).join(", ");
-  const result = await runAgent(env, memory, CAPTURE_SYSTEM, `Current time: ${new Date().toISOString()}\nExisting memory:\n${context}\n\n<capture>\n${transcript}\n</capture>\n\nProcess it into useful durable memory.`, true);
-  const suppliedPaths = chars <= 20_000 ? existing.map((file) => file.path) : [];
+  const existing = await memory.files();
+  const history = conversation ? await recentTurns(env, userId, conversation) : [];
+  const { prompt, inlined } = capturePrompt(capture, existing, new Date(), history);
+  // With all of memory in the prompt, reading, listing or searching only costs model round trips.
+  const allowed = allInlined(existing, inlined) ? ["write_memory"] : [...READ_ONLY, "write_memory"];
+  const result = await runAgent(env, memory, MEMORY_AGENT_SYSTEM_PROMPT, prompt, allowed);
+  const response = result.text || "Captured.";
+  if (conversation) {
+    await env.DB.prepare("INSERT INTO conversation_turns (user_id, conversation, said, answered, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(userId, conversation, transcript, response, Date.now()).run();
+  }
   return {
     capture: { path: capture.path, id: capture.frontmatter.id },
     createdPaths: result.createdPaths,
-    accessedPaths: [...new Set([capture.path, ...suppliedPaths, ...result.accessedPaths])].sort(),
-    response: result.text || "Captured.",
+    accessedPaths: [...new Set([capture.path, ...inlined, ...result.accessedPaths])].sort(),
+    response,
   };
 }
 
 export async function queryMemory(env: Env, userId: string, question: string) {
-  const result = await runAgent(env, new WorkerMemory(env.MEMORY, userId), QUERY_SYSTEM, `Current time: ${new Date().toISOString()}\n\nQuestion: ${question}`, false);
+  const result = await runAgent(env, new WorkerMemory(env.MEMORY, userId), MEMORY_QUERY_SYSTEM_PROMPT, `Current time: ${new Date().toISOString()}\n\nQuestion: ${question}`, READ_ONLY);
   return { answer: result.text, accessedPaths: result.accessedPaths };
 }
 
@@ -121,7 +135,7 @@ export async function generateMorningBriefing(env: Env, userId: string, localDat
   const context = chars <= 30_000
     ? files.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n") || "none yet"
     : `Memory files: ${files.map((file) => file.path).join(", ")}`;
-  const result = await runAgent(env, memory, BRIEFING_SYSTEM, `Local date: ${localDate}\nTimezone: ${timezone}\nCurrent time: ${new Date().toISOString()}\n\n${context}\n\nWrite today's morning briefing.`, false);
+  const result = await runAgent(env, memory, BRIEFING_SYSTEM, `Local date: ${localDate}\nTimezone: ${timezone}\nCurrent time: ${new Date().toISOString()}\n\n${context}\n\nWrite today's morning briefing.`, READ_ONLY);
   const content = result.text || "Nothing needs your attention this morning.";
   await memory.write({ path, content, frontmatter: { id: crypto.randomUUID(), created_at: new Date().toISOString() } });
   return {

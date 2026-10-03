@@ -464,7 +464,7 @@
   async function playRecording(blob, signal) {
     const response = await fetch("/api/talk", {
       method: "POST",
-      headers: { "content-type": blob.type || "audio/webm", "x-conversation": conversation },
+      headers: { "content-type": blob.type || "audio/webm", accept: "audio/l16", "x-conversation": conversation },
       body: blob,
       signal,
     });
@@ -473,17 +473,8 @@
       throw new Error(message.error || `Request failed (${response.status})`);
     }
     const transcript = decodeURIComponent(response.headers.get("x-transcript") || "");
-    const audio = await speaker.decodeAudioData(await response.arrayBuffer());
-    const source = speaker.createBufferSource();
-    source.buffer = audio;
-    source.connect(speaker.destination);
-    playingSources.add(source);
-    const ended = new Promise((resolve) => {
-      source.onended = () => { playingSources.delete(source); resolve(); };
-    });
-    source.start();
     status.textContent = transcript ? `You said: ${transcript}` : "Captured.";
-    await ended;
+    await playStream(response.body, signal);
   }
 
   // Audio goes to the server while you talk, so the transcript is ready right after you stop.
@@ -550,9 +541,7 @@
       status.textContent = "Hold the circle while you talk.";
       return;
     }
-    // The Bun server supports live transcription; the Cloudflare deployment currently uses
-    // its recorded-audio endpoint. Avoid a doomed WebSocket upgrade on workers.dev.
-    let liveFailed = location.hostname.endsWith(".workers.dev");
+    let liveFailed = false;
     const socket = liveFailed ? null : new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/talk/live?conversation=${conversation}`);
     if (socket) {
       socket.binaryType = "arraybuffer";

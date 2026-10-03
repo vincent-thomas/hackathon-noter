@@ -1,5 +1,6 @@
 import { parseMarkdown, serializeMarkdown } from "../harness/markdown";
 import {
+  refuseCopy,
   SearchMemoryInputSchema,
   WriteMemoryInputSchema,
   type MemoryFile,
@@ -76,6 +77,7 @@ export class WorkerMemory {
     const path = safePath(parsed.path);
     if (path.startsWith("/inbox/")) throw new Error("write_memory cannot write to /inbox");
     if (await this.bucket.head(this.key(path))) throw new Error(`memory already exists: ${path}`);
+    refuseCopy(await this.files(), path, parsed.content);
     const created = await this.bucket.put(this.key(path), serializeMarkdown(parsed.frontmatter, parsed.content), {
       httpMetadata: { contentType: "text/markdown; charset=utf-8" },
       customMetadata: { id: parsed.frontmatter.id, created_at: parsed.frontmatter.created_at },

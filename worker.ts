@@ -4,6 +4,8 @@ import { captureMemory, queryMemory } from "./cloudflare/agent";
 import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./cloudflare/briefing";
 import { configureTelegramWebhook, createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./cloudflare/telegram";
 import type { Env, User } from "./cloudflare/types";
+import { pcmResponse, speak, speakStream, transcribe } from "./gemini";
+import { connectLive, liveTranscript } from "./live";
 
 const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).strict();
 const QueryInput = z.object({ question: z.string().trim().min(1).max(20_000) }).strict();
@@ -15,44 +17,6 @@ function jsonError(error: unknown, status = 400) {
 async function body(request: Request) {
   try { return await request.json(); }
   catch { throw new Error("request body must be valid JSON"); }
-}
-
-async function gemini(env: Env, model: string, payload: object): Promise<any[]> {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error(`${model} ${response.status}: ${await response.text()}`);
-  return (await response.json<any>()).candidates?.[0]?.content?.parts ?? [];
-}
-
-async function transcribe(env: Env, audio: ArrayBuffer, mimeType: string) {
-  const parts = await gemini(env, "gemini-3.5-transcribe", {
-    contents: [{ parts: [{ inlineData: { mimeType, data: arrayBufferToBase64(audio) } }] }],
-  });
-  return parts.find((part) => part.audioTranscription)?.audioTranscription.text ?? "";
-}
-
-async function speak(env: Env, text: string) {
-  const parts = await gemini(env, "gemini-3.8-flash-lite-tts", {
-    contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"] },
-  });
-  const encoded = parts.find((part) => part.inlineData)?.inlineData.data;
-  if (!encoded) throw new Error("Gemini returned no speech audio");
-  return base64ToBytes(encoded);
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return btoa(binary);
-}
-
-function base64ToBytes(encoded: string) {
-  const binary = atob(encoded);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 async function withUser(env: Env, request: Request, work: (user: User) => Promise<Response>) {
@@ -121,14 +85,50 @@ async function api(request: Request, env: Env): Promise<Response | null> {
       return Response.json(await queryMemory(env, user.id, input.question));
     } catch (error) { return jsonError(error, 502); }
   });
+  // The page streams the recording in while the user talks. When it sends "end", the reply comes back
+  // on the same socket: a JSON message with the transcript, then the spoken reply as raw PCM, then close.
+  if (request.method === "GET" && pathname === "/api/talk/live") return withUser(env, request, async (user) => {
+    if (request.headers.get("upgrade") !== "websocket") return jsonError("expected a WebSocket", 400);
+    const live = liveTranscript(await connectLive(env.GEMINI_API_KEY));
+    const [client, socket] = Object.values(new WebSocketPair());
+    socket.accept();
+    // Binary messages may arrive as a Blob, which only reads asynchronously; the chain keeps the audio in order.
+    let audio = Promise.resolve();
+    socket.addEventListener("message", async ({ data }) => {
+      if (typeof data !== "string") {
+        audio = audio.then(async () => live.feed(new Uint8Array(await new Response(data).arrayBuffer())));
+        return;
+      }
+      try {
+        await audio;
+        const transcript = await live.finish();
+        const conversation = url.searchParams.get("conversation") ?? undefined;
+        const answer = transcript ? (await captureMemory(env, user.id, transcript, "voice", conversation)).response : "I didn't catch that.";
+        socket.send(JSON.stringify({ transcript }));
+        for await (const chunk of speakStream(env.GEMINI_API_KEY, answer)) socket.send(chunk);
+        socket.close(1000);
+      } catch (error) {
+        console.error("live talk failed:", error);
+        socket.send(JSON.stringify({ error: String(error) }));
+        socket.close(1011);
+      }
+    });
+    socket.addEventListener("close", () => live.close());
+    return new Response(null, { status: 101, webSocket: client });
+  });
+
   if (request.method === "POST" && pathname === "/api/talk") return withUser(env, request, async (user) => {
     try {
       const audio = await request.arrayBuffer();
       if (audio.byteLength > 20 * 1024 * 1024) return jsonError("recording is too large", 413);
       const mimeType = request.headers.get("content-type")?.split(";")[0] || "audio/webm";
-      const transcript = await transcribe(env, audio, mimeType);
-      const answer = transcript ? (await captureMemory(env, user.id, transcript, "voice")).response : "I didn't catch that.";
-      return new Response(await speak(env, answer), { headers: { "content-type": "audio/wav", "x-transcript": encodeURIComponent(transcript) } });
+      const transcript = await transcribe(env.GEMINI_API_KEY, audio, mimeType);
+      const conversation = request.headers.get("x-conversation") ?? undefined;
+      const answer = transcript ? (await captureMemory(env, user.id, transcript, "voice", conversation)).response : "I didn't catch that.";
+      const headers = { "x-transcript": encodeURIComponent(transcript) };
+      // Accept: audio/l16 streams raw PCM as it's generated; anything else gets a complete WAV.
+      if (request.headers.get("accept")?.includes("audio/l16")) return await pcmResponse(speakStream(env.GEMINI_API_KEY, answer), headers);
+      return new Response(await speak(env.GEMINI_API_KEY, answer), { headers: { ...headers, "content-type": "audio/wav" } });
     } catch (error) { return jsonError(error, 502); }
   });
   return pathname.startsWith("/api/") ? jsonError("not found", 404) : null;

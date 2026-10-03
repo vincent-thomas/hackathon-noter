@@ -1,5 +1,7 @@
 import { captureMemory } from "./agent";
 import type { Env, User } from "./types";
+import { speakStream, transcribe } from "../gemini";
+import { toMp3 } from "../mp3";
 
 const LINK_TTL_MS = 10 * 60_000;
 const TELEGRAM_API = "https://api.telegram.org";
@@ -64,20 +66,49 @@ async function handleMessage(env: Env, message: any) {
     return;
   }
 
-  // "typing…" while we work. Telegram drops it after 5 s, so it's resent until the reply is out.
-  const typing = () => send(env, "sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
-  await typing();
-  const timer = setInterval(typing, 4000);
-  let answer: string;
+  const voice = message.voice?.file_id;
+  if (typeof message.text !== "string" && !voice) {
+    await send(env, "sendMessage", { chat_id: chatId, text: "Send me a voice note or text message.", reply_parameters: reply });
+    return;
+  }
+  // Answered in kind: a voice note for a voice note, text for text.
+  await whileShowing(env, chatId, voice ? "record_voice" : "typing", async () => {
+    const transcript = voice ? await transcribeVoice(env, voice, message.voice.mime_type ?? "audio/ogg") : message.text;
+    const answer = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "I didn't catch that.";
+    if (!voice) return () => send(env, "sendMessage", { chat_id: chatId, text: answer, reply_parameters: reply });
+    const pcm: Uint8Array[] = [];
+    for await (const chunk of speakStream(env.GEMINI_API_KEY, answer)) pcm.push(chunk);
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("reply_parameters", JSON.stringify(reply));
+    form.append("voice", new Blob([toMp3(concat(pcm))], { type: "audio/mpeg" }), "reply.mp3");
+    return () => send(env, "sendVoice", form);
+  });
+}
+
+// Shows `action` while `prepare` works out the reply. Telegram drops it after 5 s, so it's resent;
+// it stops before the reply goes out.
+async function whileShowing(env: Env, chatId: string, action: "typing" | "record_voice", prepare: () => Promise<() => Promise<unknown>>) {
+  const show = () => send(env, "sendChatAction", { chat_id: chatId, action }).catch(() => {});
+  await show();
+  const timer = setInterval(show, 4000);
+  let reply: () => Promise<unknown>;
   try {
-    let transcript: string | undefined;
-    if (typeof message.text === "string") transcript = message.text;
-    else if (message.voice?.file_id) transcript = await transcribeVoice(env, message.voice.file_id, message.voice.mime_type ?? "audio/ogg");
-    answer = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "Send me a voice note or text message.";
+    reply = await prepare();
   } finally {
     clearInterval(timer);
   }
-  await send(env, "sendMessage", { chat_id: chatId, text: answer, reply_parameters: reply });
+  await reply();
+}
+
+function concat(chunks: Uint8Array[]): Uint8Array {
+  const all = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return all;
 }
 
 async function consumeCode(env: Env, chatId: string, code: string): Promise<User | null> {
@@ -101,25 +132,16 @@ async function transcribeVoice(env: Env, fileId: string, mimeType: string) {
   const file = await send(env, "getFile", { file_id: fileId });
   const audio = await fetch(`${TELEGRAM_API}/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
   if (!audio.ok) throw new Error(`Telegram download failed: ${audio.status}`);
-  const bytes = new Uint8Array(await audio.arrayBuffer());
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-    body: JSON.stringify({ contents: [{ parts: [{ inlineData: { mimeType, data: btoa(binary) } }] }] }),
-  });
-  if (!response.ok) throw new Error(`Gemini transcription failed: ${response.status}`);
-  const parts = (await response.json<any>()).candidates?.[0]?.content?.parts ?? [];
-  return parts.find((part: any) => part.audioTranscription)?.audioTranscription.text ?? "";
+  return transcribe(env.GEMINI_API_KEY, await audio.arrayBuffer(), mimeType);
 }
 
-async function send(env: Env, method: string, body: object): Promise<any> {
-  const response = await fetch(`${TELEGRAM_API}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function send(env: Env, method: string, body: object | FormData): Promise<any> {
+  const response = await fetch(
+    `${TELEGRAM_API}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
+    body instanceof FormData
+      ? { method: "POST", body }
+      : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+  );
   const result = await response.json<any>();
   if (!result.ok) throw new Error(`Telegram ${method}: ${result.description}`);
   return result.result;

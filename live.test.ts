@@ -4,9 +4,17 @@ import { liveTranscript } from "./live";
 // Stands in for Gemini's live socket: records what we send, replays what Gemini would answer.
 function fakeGemini() {
   const sent: any[] = [];
-  const socket: any = { send: (data: string) => sent.push(JSON.parse(data)), close: () => (socket.closed = true) };
-  const say = (message: object) => socket.onmessage({ data: JSON.stringify(message) });
-  return { socket, sent, say, open: () => socket.onopen() };
+  const listeners: Record<string, ((event: any) => unknown)[]> = {};
+  const socket: any = {
+    readyState: 0,
+    send: (data: string) => sent.push(JSON.parse(data)),
+    close: () => (socket.closed = true),
+    addEventListener: (type: string, listener: (event: any) => unknown) => (listeners[type] ??= []).push(listener),
+  };
+  const emit = async (type: string, event: object = {}) => { for (const listener of listeners[type] ?? []) await listener(event); };
+  const say = (message: object) => emit("message", { data: JSON.stringify(message) });
+  const open = () => { socket.readyState = 1; return emit("open"); };
+  return { socket, sent, say, open, emit };
 }
 const settle = () => Bun.sleep(0);
 
@@ -60,6 +68,13 @@ test("Gemini closing the connection fails the transcript", async () => {
   await gemini.say({ voiceActivity: { type: "ACTIVITY_START" } });
   const finished = live.finish();
   await settle();
-  gemini.socket.onclose({ code: 1011, reason: "quota exceeded" });
+  await gemini.emit("close", { code: 1011, reason: "quota exceeded" });
   await expect(finished).rejects.toThrow("live transcription closed: 1011 quota exceeded");
+});
+
+test("a socket that is already open, as in a Worker, gets the setup at once", () => {
+  const gemini = fakeGemini();
+  gemini.socket.readyState = 1;
+  liveTranscript(gemini.socket);
+  expect(gemini.sent[0].setup.model).toBe("models/gemini-3.5-transcribe-live");
 });

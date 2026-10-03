@@ -62,3 +62,14 @@ export type MemoryFile = {
   content: string;
 };
 
+
+/**
+ * Throws if another derived memory already holds exactly this content. With a conversation in view,
+ * the model re-files what it just recorded; an exact copy adds nothing.
+ */
+export function refuseCopy(existing: MemoryFile[], path: string, content: string): void {
+  const copy = existing.find(
+    (file) => file.path !== path && !file.path.startsWith("/inbox/") && file.content.trim() === content.trim(),
+  );
+  if (copy) throw new Error(`already recorded in ${copy.path}`);
+}

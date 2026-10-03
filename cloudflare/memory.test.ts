@@ -1,25 +1,9 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { generateMorningBriefing } from "./agent";
 import { WorkerMemory, safePath } from "./memory";
+import { Bucket } from "./test-bucket";
 
 afterEach(() => mock.restore());
-
-class Bucket {
-  objects = new Map<string, string>();
-  async head(key: string) { return this.objects.has(key) ? { key } : null; }
-  async get(key: string) {
-    const value = this.objects.get(key);
-    return value === undefined ? null : { text: async () => value };
-  }
-  async put(key: string, value: string, options?: R2PutOptions) {
-    if (options?.onlyIf && this.objects.has(key)) return null;
-    this.objects.set(key, value);
-    return { key };
-  }
-  async list({ prefix }: R2ListOptions) {
-    return { objects: [...this.objects.keys()].filter((key) => key.startsWith(prefix ?? "")).map((key) => ({ key })), truncated: false };
-  }
-}
 
 test("validates Worker virtual paths", () => {
   expect(safePath("/tasks/ask-erik.md")).toBe("/tasks/ask-erik.md");
@@ -66,4 +50,18 @@ test("the briefing harness synthesizes and persists one daily artifact", async (
   expect(second).toMatchObject({ content: first.content, created: false });
   expect(gemini).toHaveBeenCalledTimes(1);
   expect((await memory.read("/briefings/2026-10-03.md")).content).toContain("Discuss deployment with Erik");
+});
+
+test("the Worker store refuses an exact copy of an existing memory", async () => {
+  const memory = new WorkerMemory(new Bucket() as unknown as R2Bucket, "user-a");
+  const frontmatter = { id: "task-1", created_at: "2026-10-02T12:00:00.000Z" };
+  await memory.write({ path: "/tasks/dentist.md", frontmatter, content: "Dentist on Friday at 4." });
+  await expect(memory.write({ path: "/tasks/dentist-repeat.md", frontmatter: { ...frontmatter, id: "task-2" }, content: "Dentist on Friday at 4.\n" }))
+    .rejects.toThrow("already recorded in /tasks/dentist.md");
+});
+
+test("the Worker store refuses empty memories, which the model writes as placeholders", async () => {
+  const memory = new WorkerMemory(new Bucket() as unknown as R2Bucket, "user-a");
+  const frontmatter = { id: "dummy", created_at: "2026-10-02T12:00:00.000Z" };
+  await expect(memory.write({ path: "/memory/dummy.md", frontmatter, content: " \n " })).rejects.toThrow("memory content cannot be empty");
 });

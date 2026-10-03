@@ -9,6 +9,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["worker.ts", "cloudflare/**/*.ts", "harness/markdown.ts", "harness/schemas.ts"],
+  "include": ["worker.ts", "cloudflare/**/*.ts", "harness/markdown.ts", "harness/schemas.ts", "lamejs.d.ts"],
   "exclude": ["**/*.test.ts"]
 }
