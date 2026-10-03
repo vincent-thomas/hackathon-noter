@@ -46,8 +46,8 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
   expect(Buffer.from(await res.arrayBuffer())).toEqual(WAV);
 });
 
-test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () => {
-  spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
+test("Accept: audio/ogg turns the streamed reply into an OGG/Opus voice note", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(sse(audioEvent([1, 2]), audioEvent([3, 4])));
   const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OggS..."));
   const res = await talk(
     new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/ogg", accept: "audio/ogg" }, body: "abc" }),
@@ -58,8 +58,9 @@ test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () =
   const [cmd, opts] = spawn.mock.calls[0] as [string[], { stdin: Blob }];
   expect(cmd[0]).toBe("ffmpeg");
   expect(cmd.join(" ")).toContain("-c:a libopus");
+  expect(cmd.join(" ")).toContain("-f s16le -ar 24000 -ac 1 -i pipe:0");
   expect(cmd.join(" ")).toContain("-f ogg");
-  expect(Buffer.from(await opts.stdin.arrayBuffer())).toEqual(WAV);
+  expect([...new Uint8Array(await opts.stdin.arrayBuffer())]).toEqual([1, 2, 3, 4]);
   expect(res.headers.get("content-type")).toBe("audio/ogg");
   expect(await res.text()).toBe("OggS...");
 });

@@ -172,10 +172,13 @@ async function understand(audio: ArrayBuffer, mimeType: string, options: VoiceOp
   return { transcript, answer };
 }
 
-// Audio in, spoken WAV reply out.
+// The lite TTS model streams a reply faster than it returns it whole: 1.7–2.0 s against ~2.9 s.
+const speakWhole = async (text: string): Promise<Bytes> => Buffer.concat(await Array.fromAsync(speakStream(text)));
+
+// Audio in, the spoken reply out as raw PCM.
 export async function converse(audio: ArrayBuffer, mimeType: string, options: VoiceOptions): Promise<{ transcript: string; reply: Bytes }> {
   const { transcript, answer } = await understand(audio, mimeType, options);
-  return { transcript, reply: await timed("speak", speak(answer), kb) };
+  return { transcript, reply: await speakWhole(answer) };
 }
 
 // Waits for the first chunk, so a TTS failure still gets a clean 502 instead of a silent 200.
@@ -204,8 +207,13 @@ async function streamed(audio: AsyncGenerator<Bytes>, headers: Record<string, st
 }
 
 // WhatsApp and Telegram only show OGG/Opus as a voice note.
-export function toVoiceNote(wav: Bytes): Promise<Bytes> {
-  return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
+// Takes raw 24 kHz mono 16-bit PCM, which has no header, so ffmpeg is told the format.
+export function toVoiceNote(pcm: Bytes): Promise<Bytes> {
+  return timed(
+    "voice note",
+    run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "pipe:1"], pcm),
+    kb,
+  );
 }
 
 // A real reply takes seconds; this pause lets echo mode show the waiting indicators too.
@@ -227,11 +235,10 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
     const { transcript, answer } = await understand(recording, mimeType, { sandboxRoot: userSandbox(userId), capture });
     const headers = { "x-transcript": encodeURIComponent(transcript) };
     if (accept.includes("audio/l16")) return await streamed(speakStream(answer), headers);
-    const reply = await timed("speak", speak(answer), kb);
-    const voiceNote = accept.includes("audio/ogg");
-    return new Response(voiceNote ? await toVoiceNote(reply) : reply, {
-      headers: { ...headers, "content-type": voiceNote ? "audio/ogg" : "audio/wav" },
-    });
+    if (accept.includes("audio/ogg")) {
+      return new Response(await toVoiceNote(await speakWhole(answer)), { headers: { ...headers, "content-type": "audio/ogg" } });
+    }
+    return new Response(await timed("speak", speak(answer), kb), { headers: { ...headers, "content-type": "audio/wav" } });
   } catch (err) {
     console.error("talk failed:", err);
     return new Response(String(err), { status: 502 });
