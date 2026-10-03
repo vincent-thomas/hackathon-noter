@@ -55,7 +55,7 @@ test("resolves and revokes an opaque HttpOnly session", async () => {
     .run(tokenHash, userId, Date.now() + 60_000);
   const request = new Request("http://localhost", { headers: { cookie: `noter_session=${token}` } });
 
-  expect(auth.user(request)).toEqual({ id: userId, name: "Vincent" });
+  expect(auth.user(request)).toEqual({ id: userId, name: "Vincent", email: null });
   expect(auth.logout(request)).toContain("HttpOnly");
   expect(auth.logout(request)).toContain("Max-Age=0");
   expect(auth.user(request)).toBeNull();

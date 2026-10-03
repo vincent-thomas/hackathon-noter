@@ -35,7 +35,7 @@ type CredentialRow = {
   transports: string;
 };
 
-export type AuthUser = { id: string; name: string };
+export type AuthUser = { id: string; name: string; email: string | null };
 
 export class PasskeyAuth {
   readonly db: Database;
@@ -137,7 +137,7 @@ export class PasskeyAuth {
           Date.now(),
         );
     })();
-    return { user: { id: challenge.user_id, name }, cookie: this.#session(challenge.user_id) };
+    return { user: { id: challenge.user_id, name, email }, cookie: this.#session(challenge.user_id) };
   }
 
   async authenticationOptions(input?: unknown) {
@@ -180,7 +180,7 @@ export class PasskeyAuth {
     if (!verification.verified) throw new Error("passkey authentication failed");
     this.db.query("UPDATE credentials SET counter = ? WHERE id = ?")
       .run(verification.authenticationInfo.newCounter, credential.id);
-    const user = this.db.query("SELECT id, name FROM users WHERE id = ?").get(credential.user_id) as AuthUser | null;
+    const user = this.db.query("SELECT id, name, email FROM users WHERE id = ?").get(credential.user_id) as AuthUser | null;
     if (!user) throw new Error("account not found");
     return { user, cookie: this.#session(user.id) };
   }
@@ -188,7 +188,7 @@ export class PasskeyAuth {
   user(request: Request): AuthUser | null {
     const token = parseCookies(request.headers.get("cookie"))[SESSION_COOKIE];
     if (!token) return null;
-    const user = this.db.query(`SELECT users.id, users.name FROM sessions
+    const user = this.db.query(`SELECT users.id, users.name, users.email FROM sessions
       JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`)
       .get(hash(token), Date.now()) as AuthUser | null;
