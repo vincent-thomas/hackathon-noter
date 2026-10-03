@@ -1,5 +1,6 @@
-import { mkdir } from "node:fs/promises";
+import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult } from "./harness";
 import { poll } from "./telegram";
+import { z } from "zod";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -43,17 +44,53 @@ async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
   return Buffer.from(out);
 }
 
-// One throwaway container per request. The user's notes folder is its only writable path.
-// The proof-of-concept harness files the transcript as a note and replies with it unchanged.
-async function harness(transcript: string): Promise<string> {
-  const notes = `${import.meta.dir}/notes/${USER_ID}`;
-  await mkdir(notes, { recursive: true });
-  const reply = await run([
-    "docker", "run", "--rm", "-i", "--network", "none", "--cap-drop", "ALL", "--memory", "256m", "--read-only",
-    "-v", `${notes}:/notes`, "alpine",
-    "sh", "-c", 't=$(cat); echo "$t" >> /notes/notes.txt; echo "$t"',
-  ], transcript);
-  return reply.toString().trim();
+type CaptureWorkflow = typeof captureMemory;
+type QueryWorkflow = typeof queryMemoryWorkflow;
+const userSandbox = () => `${import.meta.dir}/notes/${USER_ID}`;
+
+const TextCaptureRequest = z.object({ text: z.string().trim().min(1) }).strict();
+const QueryRequest = z.object({ question: z.string().trim().min(1) }).strict();
+
+async function jsonBody(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    throw new Error("request body must be valid JSON");
+  }
+}
+
+function jsonError(error: unknown, status: number): Response {
+  return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status });
+}
+
+export async function captureText(request: Request, capture: CaptureWorkflow = captureMemory): Promise<Response> {
+  let input;
+  try {
+    input = TextCaptureRequest.parse(await jsonBody(request));
+  } catch (error) {
+    return jsonError(error, 400);
+  }
+  try {
+    return Response.json(await capture({ sandboxRoot: userSandbox(), transcript: input.text, source: "text" }), { status: 201 });
+  } catch (error) {
+    console.error("text capture failed:", error);
+    return jsonError(error, 502);
+  }
+}
+
+export async function queryMemory(request: Request, query: QueryWorkflow = queryMemoryWorkflow): Promise<Response> {
+  let input;
+  try {
+    input = QueryRequest.parse(await jsonBody(request));
+  } catch (error) {
+    return jsonError(error, 400);
+  }
+  try {
+    return Response.json(await query({ sandboxRoot: userSandbox(), question: input.question }));
+  } catch (error) {
+    console.error("memory query failed:", error);
+    return jsonError(error, 502);
+  }
 }
 
 const kb = (bytes: { byteLength: number }) => `${Math.round(bytes.byteLength / 1024)} KB`;
@@ -66,10 +103,26 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
 }
 
 // Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
-export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ transcript: string; reply: Bytes }> {
+export async function converse(
+  audio: ArrayBuffer,
+  mimeType: string,
+  options: { source?: "voice" | "telegram"; capture?: CaptureWorkflow } = {},
+): Promise<{ transcript: string; reply: Bytes }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
-  const answer = transcript ? await timed("harness", harness(transcript), JSON.stringify) : "I didn't catch that.";
+  let answer = "I didn't catch that.";
+  if (transcript) {
+    const result = await timed(
+      "harness",
+      (options.capture ?? captureMemory)({
+        sandboxRoot: userSandbox(),
+        transcript,
+        source: options.source ?? "voice",
+      }),
+      (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
+    );
+    answer = "Captured.";
+  }
   const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };
 }
@@ -80,7 +133,7 @@ export function toVoiceNote(wav: Bytes): Promise<Bytes> {
 }
 
 // Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
-export async function talk(req: Request): Promise<Response> {
+export async function talk(req: Request, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
@@ -89,7 +142,7 @@ export async function talk(req: Request): Promise<Response> {
     return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   }
   try {
-    const { transcript, reply } = await converse(recording, mimeType);
+    const { transcript, reply } = await converse(recording, mimeType, { capture });
     const voiceNote = req.headers.get("accept")?.includes("audio/ogg");
     return new Response(voiceNote ? await toVoiceNote(reply) : reply, {
       headers: { "content-type": voiceNote ? "audio/ogg" : "audio/wav", "x-transcript": encodeURIComponent(transcript) },
@@ -105,7 +158,9 @@ if (import.meta.main) {
     port: 3000,
     routes: {
       "/": Bun.file(new URL("index.html", import.meta.url)),
-      "/api/talk": { POST: talk },
+      "/api/talk": { POST: (request) => talk(request) },
+      "/api/capture/text": { POST: (request) => captureText(request) },
+      "/api/query": { POST: (request) => queryMemory(request) },
     },
   });
   console.log(`listening on ${server.url}`);

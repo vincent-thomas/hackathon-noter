@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { pollOnce } from "./telegram";
+import type { captureMemory } from "./harness";
 
 const ok = (result: unknown) => Response.json({ ok: true, result });
 const proc = (stdout: string) =>
@@ -74,16 +75,22 @@ test("a voice note gets a voice note back, as a reply", async () => {
     "gemini-3.8-flash-tts": () => Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: "V0FW" } }] } }] }),
     sendVoice: () => ok({}),
   });
-  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("buy milk")).mockReturnValueOnce(proc("OGG-OUT"));
+  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OGG-OUT"));
+  const capture = mock(async () => ({
+    capture: { path: "/inbox/capture.md", id: "capture" },
+    createdPaths: ["/tasks/buy-milk.md"],
+    response: "Processed.",
+  })) as typeof captureMemory;
 
-  expect(await pollOnce(0)).toBe(8);
+  expect(await pollOnce(0, { capture })).toBe(8);
 
   expect(callTo(fetch, "/file/bot")[0]).toBe("https://api.telegram.org/file/bot123:abc/voice/file_1.oga");
   expect(sent(callTo(fetch, "gemini-3.5-transcribe")).body.contents[0].parts[0].inlineData).toEqual({
     mimeType: "audio/ogg",
     data: Buffer.from("OGG-IN").toString("base64"),
   });
-  expect((spawn.mock.calls[1][0] as string[])[0]).toBe("ffmpeg");
+  expect(capture).toHaveBeenCalledWith(expect.objectContaining({ transcript: "buy milk", source: "telegram" }));
+  expect((spawn.mock.calls[0][0] as string[])[0]).toBe("ffmpeg");
   const form = (callTo(fetch, "sendVoice")[1] as RequestInit).body as FormData;
   expect(form.get("chat_id")).toBe("42");
   expect(JSON.parse(form.get("reply_parameters") as string)).toEqual({ message_id: 3 });
