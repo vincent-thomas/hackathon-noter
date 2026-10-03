@@ -8,6 +8,8 @@ export interface Env {
   PASSKEY_RP_ID: string;
   PASSKEY_ORIGIN: string;
   HARNESS_MODEL?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
 }
 
 export type User = { id: string; name: string; email: string };

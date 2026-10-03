@@ -2,6 +2,7 @@ import { z } from "zod";
 import { authOptions, currentUser, logout, verifyAuthentication, verifyRegistration } from "./cloudflare/auth";
 import { captureMemory, queryMemory } from "./cloudflare/agent";
 import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./cloudflare/briefing";
+import { createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./cloudflare/telegram";
 import type { Env, User } from "./cloudflare/types";
 
 const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).strict();
@@ -63,6 +64,10 @@ async function api(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   const { pathname } = url;
   const authEnv = { ...env, PASSKEY_RP_ID: url.hostname, PASSKEY_ORIGIN: url.origin };
+  if (request.method === "POST" && pathname === "/api/telegram/webhook") {
+    try { return await handleTelegramWebhook(request, env); }
+    catch (error) { console.error("Telegram webhook failed:", error); return new Response("ok"); }
+  }
   if (request.method === "POST" && pathname === "/api/auth/options") {
     try { return Response.json(await authOptions(authEnv, await body(request))); } catch (error) { return jsonError(error); }
   }
@@ -91,6 +96,14 @@ async function api(request: Request, env: Env): Promise<Response | null> {
   });
   if (request.method === "POST" && pathname === "/api/settings/briefing") return withUser(env, request, async (user) => {
     try { return Response.json(await updateBriefingSettings(env, user.id, await body(request))); }
+    catch (error) { return jsonError(error); }
+  });
+  if (request.method === "GET" && pathname === "/api/settings/telegram") return withUser(env, request, async (user) => {
+    try { return Response.json(await telegramSettings(env, user.id)); }
+    catch (error) { return jsonError(error); }
+  });
+  if (request.method === "POST" && pathname === "/api/settings/telegram/link-code") return withUser(env, request, async (user) => {
+    try { return Response.json(await createTelegramLinkCode(env, user.id)); }
     catch (error) { return jsonError(error); }
   });
   if (request.method === "POST" && pathname === "/api/capture/text") return withUser(env, request, async (user) => {

@@ -83,7 +83,7 @@ async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: 
   throw new Error("memory agent exceeded its tool-call limit");
 }
 
-export async function captureMemory(env: Env, userId: string, transcript: string, source: "voice" | "text") {
+export async function captureMemory(env: Env, userId: string, transcript: string, source: "voice" | "telegram" | "text") {
   const memory = new WorkerMemory(env.MEMORY, userId);
   const capture = await memory.createInbox(transcript, source);
   const existing = (await memory.files()).filter((file) => !file.path.startsWith("/inbox/") && file.path !== capture.path);

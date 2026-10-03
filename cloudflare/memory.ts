@@ -85,7 +85,7 @@ export class WorkerMemory {
     return { path, frontmatter: parsed.frontmatter, content: parsed.content };
   }
 
-  async createInbox(transcript: string, source: "voice" | "text"): Promise<MemoryFile> {
+  async createInbox(transcript: string, source: "voice" | "telegram" | "text"): Promise<MemoryFile> {
     const id = crypto.randomUUID();
     const created_at = new Date().toISOString();
     const path = `/inbox/${created_at.replaceAll(":", "-")}--${id}.md`;
