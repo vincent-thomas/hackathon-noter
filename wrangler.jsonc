@@ -5,6 +5,10 @@
   "compatibility_date": "2026-10-03",
   "workers_dev": true,
   "preview_urls": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "triggers": { "crons": ["0 * * * *"] },
   "assets": {
     "directory": "./dist",
