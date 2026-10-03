@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Noter</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Noter">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#0b0b0a">
+<link rel="stylesheet" href="/styles.css">
+<div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5v14M7 5l10 14V5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Noter</div>
+<section id="auth" hidden>
+  <div class="auth-panel">
+    <p class="eyebrow">Your external memory</p>
+    <h1>Clear your head.<br>Keep what matters.</h1>
+    <p class="lede">Speak naturally—thoughts, tasks, questions, half-formed ideas. Noter remembers and organizes them for later.</p>
+    <div class="auth-form">
+      <input id="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" aria-label="Email address" required>
+      <div class="auth-actions">
+        <button id="continueAuth">Continue with passkey</button>
+      </div>
+      <p id="authStatus" role="status"></p>
+    </div>
+    <p class="privacy"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6V10Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>No passwords. Your passkey stays on your device.</p>
+  </div>
+</section>
+<main id="app" hidden>
+  <div id="account"><button id="openSettings" aria-label="Open settings"><span class="account-avatar" id="accountAvatar"></span><span id="accountName"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+  <section class="capture" id="captureView">
+    <h1>What’s on your mind?</h1>
+    <p class="capture-copy">Say anything you want to remember—or ask about what you’ve said before.</p>
+    <div class="orb">
+      <canvas id="spectrum"></canvas>
+      <button id="mic" aria-label="Hold to talk"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4" stroke="currentColor" stroke-width="2"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <p id="status" role="status">Hold the circle and start speaking.</p>
+    <p class="hint">Let go when you’re done</p>
+  </section>
+  <section id="settingsView" hidden>
+    <button class="settings-back" id="closeSettings"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Back to capture</button>
+    <h1 class="settings-heading">Settings</h1>
+    <p class="settings-intro">Your account, security, and memory at a glance.</p>
+    <div class="settings-group">
+      <p class="settings-label">Account</p>
+      <div class="settings-card">
+        <div class="settings-row"><span class="settings-key">Email</span><span class="settings-value" id="settingsEmail"></span></div>
+        <div class="settings-row"><span class="settings-key">Account ID</span><span class="settings-value" id="settingsId"></span></div>
+      </div>
+    </div>
+    <div class="settings-group">
+      <p class="settings-label">Briefings</p>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-detail"><strong>Morning briefing</strong><span id="briefingStatus">Loading your preference…</span></div>
+          <label class="switch" aria-label="Email me a morning briefing"><input id="briefingToggle" type="checkbox" disabled><span class="switch-track"></span></label>
+        </div>
+      </div>
+    </div>
+    <div class="settings-group" id="telegramSettings">
+      <p class="settings-label">Telegram</p>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-detail"><strong>Link Telegram</strong><span id="telegramStatus">Generate a one-time code, then send it to your Noter bot.</span><span id="telegramCode"></span></div>
+          <button id="linkTelegram">Generate code</button>
+        </div>
+      </div>
+    </div>
+    <div class="settings-group">
+      <p class="settings-label">Security & data</p>
+      <div class="settings-card">
+        <div class="settings-row"><div class="settings-detail"><strong>Passkey protected</strong><span>Your device verifies every sign-in. Noter never stores a password.</span></div><span class="status-chip">Active</span></div>
+        <div class="settings-row"><div class="settings-detail"><strong>Private memory</strong><span>Your captures and derived notes are isolated to this account.</span></div></div>
+      </div>
+    </div>
+    <div class="settings-group">
+      <p class="settings-label">Session</p>
+      <div class="settings-card"><button id="logout">Sign out of Noter</button></div>
+    </div>
+  </section>
+</main>
+<script src="/auth-client.js"></script>
+<script type="module" src="/app.js"></script>

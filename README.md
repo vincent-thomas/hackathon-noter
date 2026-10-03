@@ -47,6 +47,7 @@ The Cloudflare Worker is the production application boundary. It serves the stat
 local/       Bun development server, local passkeys, live audio, and Telegram polling
 cloudflare/  Production Worker, D1/R2 adapters, briefings, and Telegram webhook
 harness/     Shared Markdown memory model, typed tools, Pi agent, and programmatic CLI
+frontend/    Plain HTML, CSS, and focused JavaScript modules for auth, settings, and voice
 ```
 
 Tests live beside the code they cover. Root-level files are project configuration and browser assets.
@@ -86,7 +87,7 @@ PASSKEY_RP_ID=noter.example.com
 PASSKEY_ORIGIN=https://noter.example.com
 ```
 
-The project folder is mounted into the container. Saving `local/server.ts` restarts the server, and `index.html` changes show up when you reload the page.
+The project folder is mounted into the container. Saving `local/server.ts` restarts the server, and files under `frontend/` update when you reload the page.
 
 ## Authenticated API
 
