@@ -1,6 +1,9 @@
 // TEMPORARY: no access control. Anyone who finds the bot can use it, and everything they send lands in user 1's notes.
 // Add an allowlist of Telegram user IDs before sharing the bot's username.
 import { converse, toVoiceNote } from "./server";
+import type { captureMemory } from "./harness";
+
+type TelegramDependencies = { capture?: typeof captureMemory };
 
 const api = (path = "") => `https://api.telegram.org/${path}bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -29,7 +32,7 @@ async function download(fileId: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-async function handle(message: any): Promise<void> {
+async function handle(message: any, dependencies: TelegramDependencies): Promise<void> {
   console.log(`telegram: ${describe(message)}`);
   const chat = message.chat.id;
   const replyTo = { message_id: message.message_id };
@@ -45,7 +48,10 @@ async function handle(message: any): Promise<void> {
     return;
   }
   try {
-    const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg");
+    const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg", {
+      source: "telegram",
+      capture: dependencies.capture,
+    });
     const form = new FormData();
     form.append("chat_id", String(chat));
     form.append("reply_parameters", JSON.stringify(replyTo));
@@ -61,11 +67,11 @@ async function handle(message: any): Promise<void> {
 
 // Waits up to 50 s for new messages. Telegram treats everything below the offset as delivered,
 // so a restart mid-batch replays the unfinished messages.
-export async function pollOnce(offset: number): Promise<number> {
+export async function pollOnce(offset: number, dependencies: TelegramDependencies = {}): Promise<number> {
   const updates = await call("getUpdates", { offset, timeout: 50, allowed_updates: ["message"] });
   for (const update of updates) {
     offset = update.update_id + 1;
-    if (update.message) await handle(update.message).catch((err) => console.error(`telegram: reply to chat ${update.message.chat.id} failed:`, err));
+    if (update.message) await handle(update.message, dependencies).catch((err) => console.error(`telegram: reply to chat ${update.message.chat.id} failed:`, err));
   }
   return offset;
 }

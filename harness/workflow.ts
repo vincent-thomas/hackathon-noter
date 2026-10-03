@@ -4,6 +4,7 @@ import { createInboxCapture } from "./inbox";
 export type CaptureMemoryResult = {
   capture: { path: string; id: string };
   createdPaths: string[];
+  accessedPaths: string[];
   response: string;
 };
 
@@ -37,4 +38,3 @@ export async function queryMemoryWorkflow(options: {
 }): Promise<MemoryQueryResult> {
   return queryMemory(options);
 }
-

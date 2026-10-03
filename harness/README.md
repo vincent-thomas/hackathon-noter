@@ -19,7 +19,7 @@ bun harness/cli.ts capture \
 ```
 
 ```json
-{"capture":{"path":"/inbox/...md","id":"capture-id"},"createdPaths":["/tasks/ask-erik-about-deployment.md"],"response":"Capture processed."}
+{"capture":{"path":"/inbox/...md","id":"capture-id"},"createdPaths":["/tasks/ask-erik-about-deployment.md"],"accessedPaths":[],"response":"Captured."}
 ```
 
 Query accumulated memory:

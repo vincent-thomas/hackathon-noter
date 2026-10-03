@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { talk } from "./server";
+import { captureText, queryMemory, talk } from "./server";
+import type { captureMemory, queryMemoryWorkflow } from "./harness";
 
 const WAV = Buffer.from("RIFF....WAVE");
 const heard = (text: string) =>
   Response.json({ candidates: [{ content: { parts: [{ text: "" }, { audioTranscription: { text } }] } }] });
 const spoken = () =>
   Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/wav", data: WAV.toString("base64") } }] } }] });
-const post = () =>
-  talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }));
+const remembered = (createdPaths = ["/tasks/hello.md"]) =>
+  mock(async () => ({ capture: { path: "/inbox/capture.md", id: "capture" }, createdPaths, accessedPaths: [], response: "Processed." })) as typeof captureMemory;
+const post = (capture = remembered()) =>
+  talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }), capture);
 const sent = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
 
 // Bun loads .env into tests too, and ECHO=1 there would short-circuit every pipeline test.
@@ -17,27 +19,24 @@ afterEach(() => mock.restore());
 
 const proc = (stdout: string, code = 0, stderr = "") =>
   ({ stdout: new Response(stdout).body, stderr: new Response(stderr).body, exited: Promise.resolve(code) }) as any;
-const sandbox = (stdout: string, code = 0, stderr = "") => spyOn(Bun, "spawn").mockReturnValue(proc(stdout, code, stderr));
 
-test("talk transcribes the recording, runs the harness in a sandbox, and speaks its reply", async () => {
+test("talk transcribes, runs the unified memory interaction, and speaks its response", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
-  const spawn = sandbox("hello there\n");
-  const res = await post();
+  const capture = remembered();
+  const res = await post(capture);
 
-  const [cmd, opts] = spawn.mock.calls[0] as [string[], { stdin: Blob }];
-  expect(cmd.slice(0, 3)).toEqual(["docker", "run", "--rm"]);
-  expect(cmd).toContain("--read-only");
-  expect(cmd.join(" ")).toContain("--network none");
-  expect(cmd.join(" ")).toContain(`-v ${import.meta.dir}/notes/1:/notes`);
-  expect(existsSync(`${import.meta.dir}/notes/1`)).toBe(true);
-  expect(await opts.stdin.text()).toBe("hello there");
+  expect(capture).toHaveBeenCalledWith({
+    sandboxRoot: `${import.meta.dir}/notes/1`,
+    transcript: "hello there",
+    source: "voice",
+  });
 
   const [stt, tts] = gemini.mock.calls;
   expect(stt[0]).toContain("gemini-3.5-transcribe:generateContent");
   expect(sent(stt).contents[0].parts[0].inlineData).toEqual({ mimeType: "audio/webm", data: "YWJj" });
   expect(tts[0]).toContain("gemini-3.8-flash-tts:generateContent");
   expect(sent(tts)).toEqual({
-    contents: [{ parts: [{ text: "hello there" }] }],
+    contents: [{ parts: [{ text: "Processed." }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
   });
 
@@ -48,12 +47,13 @@ test("talk transcribes the recording, runs the harness in a sandbox, and speaks 
 
 test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
-  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("hello there")).mockReturnValueOnce(proc("OggS..."));
+  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OggS..."));
   const res = await talk(
     new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/ogg", accept: "audio/ogg" }, body: "abc" }),
+    remembered(),
   );
 
-  const [cmd, opts] = spawn.mock.calls[1] as [string[], { stdin: Blob }];
+  const [cmd, opts] = spawn.mock.calls[0] as [string[], { stdin: Blob }];
   expect(cmd[0]).toBe("ffmpeg");
   expect(cmd.join(" ")).toContain("-c:a libopus");
   expect(cmd.join(" ")).toContain("-f ogg");
@@ -62,20 +62,20 @@ test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () =
   expect(await res.text()).toBe("OggS...");
 });
 
-test("talk says so when it heard nothing, without starting a sandbox", async () => {
+test("talk says so when it heard nothing, without invoking the memory harness", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("")).mockResolvedValueOnce(spoken());
-  const spawn = sandbox("");
-  await post();
-  expect(spawn).not.toHaveBeenCalled();
+  const capture = remembered();
+  await post(capture);
+  expect(capture).not.toHaveBeenCalled();
   expect(sent(gemini.mock.calls[1]).contents[0].parts[0].text).toBe("I didn't catch that.");
 });
 
-test("talk surfaces a sandbox failure", async () => {
+test("talk surfaces a memory harness failure", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there"));
-  sandbox("", 125, "Cannot connect to the Docker daemon");
-  const res = await post();
+  const capture = mock(async () => { throw new Error("agent failed"); }) as typeof captureMemory;
+  const res = await post(capture);
   expect(res.status).toBe(502);
-  expect(await res.text()).toContain("docker exited 125: Cannot connect to the Docker daemon");
+  expect(await res.text()).toContain("agent failed");
 });
 
 test("talk surfaces a Gemini failure", async () => {
@@ -93,4 +93,64 @@ test("ECHO=1 plays the recording back without calling Gemini", async () => {
   expect(res.headers.get("content-type")).toBe("audio/webm");
   expect(res.headers.get("x-transcript")).toBe("(echo)");
   expect(await res.text()).toBe("abc");
+});
+
+test("POST /api/capture/text runs the programmatic capture workflow", async () => {
+  const capture = remembered(["/tasks/ask-erik.md"]);
+  const res = await captureText(
+    new Request("http://x/api/capture/text", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Ask Erik about deployment tomorrow" }),
+    }),
+    capture,
+  );
+
+  expect(res.status).toBe(201);
+  expect(capture).toHaveBeenCalledWith({
+    sandboxRoot: `${import.meta.dir}/notes/1`,
+    transcript: "Ask Erik about deployment tomorrow",
+    source: "text",
+  });
+  expect((await res.json()).createdPaths).toEqual(["/tasks/ask-erik.md"]);
+});
+
+test("POST /api/query returns an answer and separately tracked paths", async () => {
+  const query = mock(async () => ({
+    answer: "Discuss deployment with Erik.",
+    accessedPaths: ["/tasks/ask-erik.md"],
+  })) as typeof queryMemoryWorkflow;
+  const res = await queryMemory(
+    new Request("http://x/api/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question: "What should I discuss with Erik?" }),
+    }),
+    query,
+  );
+
+  expect(res.status).toBe(200);
+  expect(query).toHaveBeenCalledWith({
+    sandboxRoot: `${import.meta.dir}/notes/1`,
+    question: "What should I discuss with Erik?",
+  });
+  expect(await res.json()).toEqual({
+    answer: "Discuss deployment with Erik.",
+    accessedPaths: ["/tasks/ask-erik.md"],
+  });
+});
+
+test("programmatic endpoints reject invalid JSON input without invoking agents", async () => {
+  const capture = remembered();
+  const query = mock(async () => ({ answer: "", accessedPaths: [] })) as typeof queryMemoryWorkflow;
+  const captureRes = await captureText(new Request("http://x", { method: "POST", body: "{" }), capture);
+  const queryRes = await queryMemory(
+    new Request("http://x", { method: "POST", body: JSON.stringify({ question: "" }) }),
+    query,
+  );
+
+  expect(captureRes.status).toBe(400);
+  expect(queryRes.status).toBe(400);
+  expect(capture).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
 });
