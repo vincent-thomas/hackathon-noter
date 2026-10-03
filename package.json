@@ -8,7 +8,7 @@
     "cf:dev": "bun run build:assets && wrangler dev",
     "cf:types": "wrangler types",
     "cf:check": "tsc -p tsconfig.worker.json && bun run build:assets && wrangler deploy --dry-run",
-    "cf:deploy": "bun run build:assets && wrangler deploy",
+    "cf:deploy": "wrangler d1 migrations apply noter-accounts --remote && bun run build:assets && wrangler deploy",
     "cf:preview": "bun run build:assets && wrangler preview",
     "test": "bun test"
   },
