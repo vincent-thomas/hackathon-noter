@@ -1,85 +1,57 @@
 # Memory harness
 
-The runnable path models the product loop directly:
+The harness is intended for programmatic use:
 
 ```text
-text capture → backend-owned /inbox file → Pi agent → derived memory files
+capture → backend-owned /inbox file → Pi agent → derived memory
+query → read-only Pi agent → answer + accessed paths
 ```
 
-## Run
+Set `GEMINI_API_KEY` in the environment or `.env`. `MEMORY_ROOT` selects the persistent user sandbox and defaults to `notes/cli`. `PI_MODEL` optionally overrides the default `gemini-3.8-flash` model.
 
-Set `GEMINI_API_KEY` in `.env`, install dependencies, and start a capture:
+## JSON CLI
+
+Every invocation writes exactly one JSON object to standard output. Errors also use JSON and return a nonzero exit status.
 
 ```sh
-bun install
-bun run harness
+bun harness/cli.ts capture \
+  "Ask Erik about deployment tomorrow. The Docker image may be causing startup latency."
 ```
-
-Or provide the capture directly:
-
-```sh
-bun run harness -- capture "Ask Erik about deployment tomorrow. The Docker image may be causing startup latency."
-```
-
-The CLI prints the agent's tool trajectory and the paths it creates. Persistent files live in `notes/cli/` by default. The agent defaults to `gemini-3.8-flash`. Use a different sandbox with `MEMORY_ROOT=/path/to/memory` and a different Google model with `PI_MODEL=<model-id>`.
-
-Run another capture to let the agent search and build on the same memory:
-
-```sh
-bun run harness -- capture "The image-size hypothesis was wrong; startup is waiting for the database connection."
-```
-
-Ask a natural-language question across accumulated memory:
-
-```sh
-bun run harness -- query "What do I need to discuss with Erik, and what do we know about the startup problem?"
-```
-
-Queries are read-only. The query agent receives `list_memory`, `search_memory`, and `read_memory`, but not `write_memory`. Answers do not expose source paths; `queryMemory()` returns the consulted paths separately in `accessedPaths` for logging and observability.
-
-## Programmatic use
-
-Use JSON mode from any process. Standard output contains exactly one JSON object:
-
-```sh
-bun run harness -- --json capture "Ask Erik about deployment tomorrow"
-bun run harness -- --json query "What do I need to discuss with Erik?"
-```
-
-Query output has the shape:
 
 ```json
-{"answer":"You need to discuss deployment.","accessedPaths":["/tasks/ask-erik-about-deployment.md"]}
+{"capture":{"path":"/inbox/...md","id":"capture-id"},"createdPaths":["/tasks/ask-erik-about-deployment.md"],"response":"Capture processed."}
 ```
 
-Or call the TypeScript API directly:
+Query accumulated memory:
+
+```sh
+bun harness/cli.ts query "What do I need to discuss with Erik?"
+```
+
+```json
+{"answer":"You need to discuss deployment with Erik.","accessedPaths":["/tasks/ask-erik-about-deployment.md"]}
+```
+
+`accessedPaths` is separate provenance metadata and is not included in the answer. The older `--json` flag remains accepted but is unnecessary because all output is JSON.
+
+## TypeScript API
 
 ```ts
 import { captureMemory, queryMemoryWorkflow } from "./harness";
 
-await captureMemory({
+const capture = await captureMemory({
   sandboxRoot: "./notes/user-1",
   transcript: "Ask Erik about deployment tomorrow",
+  source: "text",
 });
 
-const { answer, accessedPaths } = await queryMemoryWorkflow({
+const query = await queryMemoryWorkflow({
   sandboxRoot: "./notes/user-1",
   question: "What do I need to discuss with Erik?",
 });
+
+console.log(capture.createdPaths);
+console.log(query.answer, query.accessedPaths);
 ```
 
-## Inspect or debug
-
-Open the low-level storage shell:
-
-```sh
-bun run harness -- shell
-```
-
-Its commands are `list`, `read`, `search`, and `write`. A one-shot example is:
-
-```sh
-bun run harness -- shell list /memory
-```
-
-The shell is for debugging. Normal captures always enter through the backend-only inbox writer; the agent receives no inbox-writing, shell, or raw filesystem tool.
+The high-level API accepts optional `model` and `onEvent` fields. Lower-level schemas, storage operations, and tool factories remain exported from `./harness` for backend integration and testing.
