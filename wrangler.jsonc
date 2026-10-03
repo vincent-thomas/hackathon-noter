@@ -23,5 +23,20 @@
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "MEMORY", "bucket_name": "noter-memory" }]
+  "r2_buckets": [{ "binding": "MEMORY", "bucket_name": "noter-memory" }],
+  "previews": {
+    "vars": {
+      "HARNESS_MODEL": "gemini-3.8-flash",
+      "RESEND_FROM": "Noter <onboarding@resend.dev>"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "noter-accounts-preview",
+        "database_id": "7d54b674-0323-4d9e-b2b1-45ef05f40cb3",
+        "migrations_dir": "migrations"
+      }
+    ],
+    "r2_buckets": [{ "binding": "MEMORY", "bucket_name": "noter-memory-preview" }]
+  }
 }
