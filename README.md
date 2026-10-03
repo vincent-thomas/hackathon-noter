@@ -57,7 +57,6 @@ The Cloudflare Worker is the production application boundary. It serves the stat
 | Telegram Bot API | Text and voice capture through a shared production webhook |
 | Wrangler | Local Worker development, migrations, secrets, previews, and deployment |
 | Node.js | Local development server (`dev.mjs`) that runs the Worker and works behind an egress proxy |
-| lamejs | MP3 encoding of spoken replies, so Telegram shows them as voice notes; Workers can't run ffmpeg |
 
 ## Run it
 
@@ -144,7 +143,7 @@ Telegram requires a linked passkey account and uses that account's memory. Unlin
 
 The page records while you hold the circle and streams the audio over `GET /api/talk/live`, so the transcript is ready about 0.4 s after you let go. The reply streams back as raw 24 kHz mono 16-bit PCM and plays as it arrives. If the live connection fails, the page uploads the recording to `POST /api/talk` instead, with the same streamed reply.
 
-Telegram voice notes get a voice note back, encoded as MP3, which Telegram shows as a voice message. Text gets text.
+Telegram accepts both voice notes and text, and replies with text. Keeping replies textual avoids CPU-heavy audio encoding inside the Worker.
 
 ## Telegram
 
@@ -191,8 +190,6 @@ bun run cf:deploy
 ```
 
 For local development, see [Run it](#run-it).
-
-Encoding a Telegram voice reply as MP3 takes about 60–190 ms of CPU, more than the Workers free plan's 10 ms per request, so voice replies need the Workers Paid plan.
 
 ### Morning briefings
 
