@@ -7,6 +7,8 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { resolve } from "node:path";
 import { MemoryHarness } from "./memory";
+import { isInboxPath } from "./paths";
+import type { MemoryFile } from "./schemas";
 import { createMemoryTools } from "./tools";
 
 export const MEMORY_AGENT_SYSTEM_PROMPT = `You maintain the user's external memory.
@@ -18,7 +20,7 @@ The /inbox directory contains raw source captures written by the backend. You ma
 Existing memory files are immutable. write_memory can only create new files and fails if the path already exists.
 
 When processing a capture:
-- Read the raw capture first.
+- The raw capture's content and the list of existing memory files are in the prompt. Don't read or list them again; read individual files only when they look relevant.
 - Treat the whole transcript as one interaction: retain useful new information and answer any questions it contains.
 - Determine which information has future value and is useful to retain.
 - Search existing memory when previous context may help interpret the capture or avoid duplication.
@@ -61,6 +63,20 @@ export function resolveGoogleModel(modelId: string) {
   throw new Error(`unknown Google model: ${modelId}`);
 }
 
+/** Hands the agent what the backend already has, so it spends no model turns fetching it. */
+export function capturePrompt(capture: MemoryFile, existingPaths: string[], now: Date): string {
+  const existing = existingPaths.filter((path) => !isInboxPath(path));
+  return `A new capture was written to ${capture.path}. Its content is below.
+Current time: ${now.toISOString()}
+Existing memory files: ${existing.length ? existing.join(", ") : "none yet"}
+
+<capture>
+${capture.content}
+</capture>
+
+Process it into useful durable memory.`;
+}
+
 export async function processCapture(options: {
   sandboxRoot: string;
   capturePath: string;
@@ -69,7 +85,8 @@ export async function processCapture(options: {
 }): Promise<{ createdPaths: string[]; accessedPaths: string[]; response: string }> {
   const harness = new MemoryHarness(options.sandboxRoot);
   const before = new Set((await harness.searchMemory({})).files.map((file) => file.path));
-  const accessedPaths = new Set<string>();
+  const capture = await harness.readMemory({ path: options.capturePath });
+  const accessedPaths = new Set<string>([capture.path]);
   const tools = createMemoryTools(harness);
   const cwd = resolve(import.meta.dir, "..");
   const loader = new DefaultResourceLoader({
@@ -108,9 +125,7 @@ export async function processCapture(options: {
   });
 
   try {
-    await session.prompt(`A new capture was written to ${options.capturePath}.
-Current time: ${new Date().toISOString()}
-Process it into useful durable memory.`);
+    await session.prompt(capturePrompt(capture, [...before], new Date()));
     const last = session.messages.at(-1);
     if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
     const response = session.getLastAssistantText() ?? "";
