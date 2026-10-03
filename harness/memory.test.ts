@@ -95,6 +95,14 @@ describe("MemoryHarness", () => {
     ]);
   });
 
+  test("rejects empty memories, which the model writes as placeholders", async () => {
+    const { harness } = await setup();
+    const input = { path: "/memory/dummy.md", frontmatter: { id: "dummy", created_at: CREATED_AT } };
+    await expect(harness.writeMemory({ ...input, content: "" })).rejects.toThrow("memory content cannot be empty");
+    await expect(harness.writeMemory({ ...input, content: " \n " })).rejects.toThrow("memory content cannot be empty");
+    expect((await harness.listMemory({ path: "/memory" })).files).toEqual([]);
+  });
+
   test("rejects traversal, host paths, invalid extensions, and symlink escape", async () => {
     const { root, harness } = await setup();
     const input = {

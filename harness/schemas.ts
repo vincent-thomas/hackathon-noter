@@ -42,7 +42,8 @@ export const SearchMemoryInputSchema = z
 export const WriteMemoryInputSchema = z
   .object({
     path: z.string().min(1),
-    content: z.string(),
+    // The model fills blank files when it feels it must call a tool; an empty memory is never worth keeping.
+    content: z.string().refine((content) => content.trim() !== "", "memory content cannot be empty"),
     frontmatter: CaptureFrontmatterSchema,
   })
   .strict();
