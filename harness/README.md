@@ -29,6 +29,14 @@ Run another capture to let the agent search and build on the same memory:
 bun run harness -- capture "The image-size hypothesis was wrong; startup is waiting for the database connection."
 ```
 
+Ask a natural-language question across accumulated memory:
+
+```sh
+bun run harness -- query "What do I need to discuss with Erik, and what do we know about the startup problem?"
+```
+
+Queries are read-only. The query agent receives `list_memory`, `search_memory`, and `read_memory`, but not `write_memory`.
+
 ## Inspect or debug
 
 Open the low-level storage shell:

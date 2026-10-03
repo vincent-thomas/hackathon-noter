@@ -32,6 +32,10 @@ When processing a capture:
 - If new information changes older memory, create a new memory describing the update rather than editing the old file.
 - Supply a new unique id and the current offset-aware ISO timestamp for every write.`;
 
+export const MEMORY_QUERY_SYSTEM_PROMPT = `You answer questions using the user's external memory.
+
+Use list_memory, search_memory, and read_memory to find relevant information. The filesystem is the only source of truth. Do not claim facts that are absent from it. Clearly say when the stored memory is insufficient or contradictory. Give a concise, useful answer and cite supporting virtual file paths. You have read-only access and cannot create or alter memory.`;
+
 export type AgentTraceEvent =
   | { type: "tool_start"; tool: string; input: unknown }
   | { type: "tool_end"; tool: string; isError: boolean }
@@ -105,6 +109,60 @@ Process it into useful durable memory.`);
       createdPaths: after.files.map((file) => file.path).filter((path) => !before.has(path)),
       response,
     };
+  } finally {
+    unsubscribe();
+    session.dispose();
+  }
+}
+
+export async function queryMemory(options: {
+  sandboxRoot: string;
+  question: string;
+  model?: string;
+  onEvent?: (event: AgentTraceEvent) => void;
+}): Promise<string> {
+  if (!options.question.trim()) throw new Error("query cannot be empty");
+  const harness = new MemoryHarness(options.sandboxRoot);
+  const tools = createMemoryTools(harness).filter((tool) => tool.name !== "write_memory");
+  const cwd = resolve(import.meta.dir, "..");
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir: getAgentDir(),
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    systemPrompt: MEMORY_QUERY_SYSTEM_PROMPT,
+    appendSystemPrompt: [],
+  });
+  await loader.reload();
+
+  const { session } = await createAgentSession({
+    cwd,
+    model: resolveGoogleModel(options.model ?? "gemini-3.8-flash"),
+    thinkingLevel: "low",
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(),
+    noTools: "builtin",
+    tools: tools.map((tool) => tool.name),
+    customTools: tools,
+  });
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === "tool_execution_start") {
+      options.onEvent?.({ type: "tool_start", tool: event.toolName, input: event.args });
+    } else if (event.type === "tool_execution_end") {
+      options.onEvent?.({ type: "tool_end", tool: event.toolName, isError: event.isError });
+    }
+  });
+
+  try {
+    await session.prompt(`Current time: ${new Date().toISOString()}\n\nQuestion: ${options.question}`);
+    const last = session.messages.at(-1);
+    if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
+    const response = session.getLastAssistantText() ?? "";
+    options.onEvent?.({ type: "assistant", text: response });
+    return response;
   } finally {
     unsubscribe();
     session.dispose();

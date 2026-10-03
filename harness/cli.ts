@@ -2,7 +2,7 @@
 
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
-import { processCapture } from "./agent";
+import { processCapture, queryMemory } from "./agent";
 import { createInboxCapture } from "./inbox";
 import { MemoryHarness } from "./memory";
 
@@ -24,6 +24,7 @@ Examples:
 const USAGE = `Usage:
   bun run harness
   bun run harness -- capture "your unstructured thought"
+  bun run harness -- query "what should I focus on today?"
   bun run harness -- shell
   bun run harness -- shell list /tasks`;
 
@@ -119,6 +120,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === "query") {
+    if (args.length < 2) throw new Error(USAGE);
+    await query(sandboxRoot, args.slice(1).join(" "));
+    return;
+  }
+
   if (args.length && args[0] !== "shell") throw new Error(USAGE);
   const shellCommand = args.slice(1);
   if (shellCommand.length) {
@@ -185,6 +192,23 @@ async function captureAndProcess(sandboxRoot: string, transcript: string): Promi
   } else {
     console.log("\nNo derived memory was needed.");
   }
+}
+
+async function query(sandboxRoot: string, question: string): Promise<void> {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is required. Add it to .env or export it before running the harness.");
+  }
+  console.log("Agent searching memory…");
+  const answer = await queryMemory({
+    sandboxRoot,
+    question,
+    model: process.env.PI_MODEL,
+    onEvent: (event) => {
+      if (event.type === "tool_start") console.log(`  → ${event.tool} ${JSON.stringify(event.input)}`);
+      if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
+    },
+  });
+  console.log(`\n${answer}`);
 }
 
 if (import.meta.main) await main();
