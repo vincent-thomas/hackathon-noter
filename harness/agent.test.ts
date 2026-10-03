@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { capturePrompt, INLINE_MEMORY_BUDGET, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
+import { allInlined, capturePrompt, INLINE_MEMORY_BUDGET, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
 
 test("uses Gemini 3.8 Flash through Pi's Google Flash transport", () => {
   const model = resolveGoogleModel("gemini-3.8-flash");
@@ -73,4 +73,11 @@ test("over the budget, the capture prompt lists memory paths only", () => {
   expect(prompt).toContain("Existing memory files: /memory/big.md, /tasks/erik.md\n");
   expect(prompt).not.toContain("Ask Erik.");
   expect(inlined).toEqual([]);
+});
+
+test("all memory counts as inlined only when every derived file made it into the prompt", () => {
+  const files = [file("/inbox/raw.md", "raw"), file("/tasks/erik.md", "Ask Erik.")];
+  expect(allInlined(files, ["/tasks/erik.md"])).toBe(true);
+  expect(allInlined(files, [])).toBe(false);
+  expect(allInlined([file("/inbox/raw.md", "raw")], [])).toBe(true);
 });

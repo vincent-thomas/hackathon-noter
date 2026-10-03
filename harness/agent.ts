@@ -91,8 +91,13 @@ ${memory}
 ${capture.content}
 </capture>
 
-Process it into useful durable memory.`;
+Process it into useful durable memory. If the capture only asks a question, answer it without calling any tool.`;
   return { prompt, inlined: inlined.map((file) => file.path) };
+}
+
+/** Whether every derived memory file is already in the prompt. Raw inbox captures don't count. */
+export function allInlined(existing: MemoryFile[], inlined: string[]): boolean {
+  return existing.every((file) => isInboxPath(file.path) || inlined.includes(file.path));
 }
 
 export async function processCapture(options: {
@@ -105,8 +110,11 @@ export async function processCapture(options: {
   const existing = (await harness.searchMemory({})).files;
   const before = new Set(existing.map((file) => file.path));
   const capture = await harness.readMemory({ path: options.capturePath });
-  const accessedPaths = new Set<string>([capture.path]);
-  const tools = createMemoryTools(harness);
+  const { prompt, inlined } = capturePrompt(capture, existing, new Date());
+  // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
+  const accessedPaths = new Set<string>([capture.path, ...inlined]);
+  // With all of memory in the prompt, reading, listing or searching only costs model round trips.
+  const tools = createMemoryTools(harness).filter((tool) => !allInlined(existing, inlined) || tool.name === "write_memory");
   const cwd = resolve(import.meta.dir, "..");
   const loader = new DefaultResourceLoader({
     cwd,
@@ -144,9 +152,6 @@ export async function processCapture(options: {
   });
 
   try {
-    const { prompt, inlined } = capturePrompt(capture, existing, new Date());
-    // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
-    for (const path of inlined) accessedPaths.add(path);
     await session.prompt(prompt);
     const last = session.messages.at(-1);
     if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
