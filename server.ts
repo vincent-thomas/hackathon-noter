@@ -342,6 +342,9 @@ if (import.meta.main) {
           catch (error) { return jsonError(error, 400); }
         }),
       },
+      "/api/settings/telegram/link-code": {
+        POST: (request) => withUser(request, async (user) => Response.json(auth().createTelegramLinkCode(user.id))),
+      },
       "/api/talk": { POST: (request) => withUser(request, (user) => talk(request, user.id)) },
       "/api/talk/live": (request, server) => {
         const user = auth().user(request);
@@ -355,5 +358,8 @@ if (import.meta.main) {
     websocket: liveTalk,
   });
   console.log(`listening on ${server.url}`);
-  if (process.env.TELEGRAM_BOT_TOKEN) poll();
+  if (process.env.TELEGRAM_BOT_TOKEN) poll({
+    resolveUser: (chatId) => auth().telegramUser(chatId),
+    linkAccount: (chatId, code) => auth().linkTelegram(chatId, code),
+  });
 }

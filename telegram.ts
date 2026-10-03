@@ -3,7 +3,11 @@
 import { converse, echoDelay, respond, toVoiceNote } from "./server";
 import type { captureMemory } from "./harness";
 
-type TelegramDependencies = { capture?: typeof captureMemory };
+type TelegramDependencies = {
+  capture?: typeof captureMemory;
+  resolveUser: (chatId: number) => { id: string; email: string | null } | null;
+  linkAccount: (chatId: number, code: string) => { id: string; email: string | null };
+};
 
 const api = (path = "") => `https://api.telegram.org/${path}bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -73,12 +77,34 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
   // ECHO=1 skips Gemini: text comes back as is, and Telegram resends a voice note by its file ID.
   const echo = process.env.ECHO === "1";
 
+  const link = typeof message.text === "string" ? message.text.match(/^\/link(?:@\w+)?\s+([A-Z0-9]+)\s*$/i) : null;
+  if (link) {
+    try {
+      const user = dependencies.linkAccount(chat, link[1]);
+      await call("sendMessage", { chat_id: chat, text: `Linked to ${user.email ?? "your Noter account"}. You can send a voice note or text now.`, reply_parameters: replyTo });
+    } catch {
+      await call("sendMessage", { chat_id: chat, text: "That link code is invalid or expired. Generate a new one in Noter Settings.", reply_parameters: replyTo });
+    }
+    return;
+  }
+
+  const user = dependencies.resolveUser(chat);
+  if (!user) {
+    await call("sendMessage", {
+      chat_id: chat,
+      text: "Link a Noter account first. Sign in to Noter, open Settings, generate a Telegram code, then send /link CODE here.",
+      reply_parameters: replyTo,
+    });
+    return;
+  }
+  const sandboxRoot = `${import.meta.dir}/notes/users/${user.id}`;
+
   if (message.text) {
     await sendAfter(chat, "typing", async () => {
       const text = echo
         ? (await echoDelay(), message.text)
         : await respond(message.text, {
-            sandboxRoot: `${import.meta.dir}/notes/telegram/${chat}`,
+            sandboxRoot,
             source: "telegram",
             capture: dependencies.capture,
           });
@@ -98,7 +124,7 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
       return () => call("sendVoice", { chat_id: chat, voice: message.voice.file_id, reply_parameters: replyTo });
     }
     const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg", {
-      sandboxRoot: `${import.meta.dir}/notes/telegram/${chat}`,
+      sandboxRoot,
       source: "telegram",
       capture: dependencies.capture,
     });
@@ -117,7 +143,7 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
 
 // Waits up to 50 s for new messages. Telegram treats everything below the offset as delivered,
 // so a restart mid-batch replays the unfinished messages.
-export async function pollOnce(offset: number, dependencies: TelegramDependencies = {}): Promise<number> {
+export async function pollOnce(offset: number, dependencies: TelegramDependencies): Promise<number> {
   const updates = await call("getUpdates", { offset, timeout: 50, allowed_updates: ["message"] });
   for (const update of updates) {
     offset = update.update_id + 1;
@@ -126,7 +152,7 @@ export async function pollOnce(offset: number, dependencies: TelegramDependencie
   return offset;
 }
 
-export async function poll(): Promise<void> {
+export async function poll(dependencies: TelegramDependencies): Promise<void> {
   try {
     const me = await call("getMe");
     console.log(`telegram: polling as @${me.username}`);
@@ -137,7 +163,7 @@ export async function poll(): Promise<void> {
   let offset = 0;
   for (;;) {
     try {
-      offset = await pollOnce(offset);
+      offset = await pollOnce(offset, dependencies);
     } catch (err) {
       console.error("telegram: polling failed, retrying in 5 s:", err);
       await Bun.sleep(5000);

@@ -6,6 +6,11 @@ const ok = (result: unknown) => Response.json({ ok: true, result });
 const proc = (stdout: string) =>
   ({ stdout: new Response(stdout).body, stderr: new Response("").body, exited: Promise.resolve(0) }) as any;
 const voiceUpdate = { update_id: 7, message: { message_id: 3, chat: { id: 42 }, voice: { file_id: "F1", duration: 2, mime_type: "audio/ogg" } } };
+const linked = (extra: Record<string, unknown> = {}) => ({
+  resolveUser: () => ({ id: "account-1", email: "vincent@example.com" }),
+  linkAccount: () => ({ id: "account-1", email: "vincent@example.com" }),
+  ...extra,
+}) as any;
 
 // Answers each fetch by the first route whose key is in the URL.
 const routes = (table: Record<string, () => Response>) =>
@@ -32,7 +37,7 @@ test("pollOnce long-polls for messages and asks for a voice note or text", async
     .mockResolvedValueOnce(ok([{ update_id: 7, message: { chat: { id: 42 }, photo: [] } }]))
     .mockResolvedValueOnce(ok({}));
 
-  expect(await pollOnce(5)).toBe(8);
+  expect(await pollOnce(5, linked())).toBe(8);
 
   const [getUpdates, sendMessage] = telegram.mock.calls.map(sent);
   expect(getUpdates.url).toBe("https://api.telegram.org/bot123:abc/getUpdates");
@@ -43,7 +48,28 @@ test("pollOnce long-polls for messages and asks for a voice note or text", async
 
 test("pollOnce keeps the offset when there is nothing new", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(ok([]));
-  expect(await pollOnce(5)).toBe(5);
+  expect(await pollOnce(5, linked())).toBe(5);
+});
+
+test("an unlinked chat cannot reach the harness", async () => {
+  const fetch = routes({ getUpdates: () => ok([textUpdate]), sendMessage: () => ok({}) });
+  const capture = mock() as unknown as typeof captureMemory;
+
+  await pollOnce(0, { resolveUser: () => null, linkAccount: linked().linkAccount, capture });
+
+  expect(capture).not.toHaveBeenCalled();
+  expect(sent(callTo(fetch, "sendMessage")).body.text).toContain("Link a Noter account first");
+});
+
+test("a valid link command connects the chat without invoking the harness", async () => {
+  const update = { update_id: 10, message: { message_id: 6, chat: { id: 42 }, text: "/link ABCD2345" } };
+  const fetch = routes({ getUpdates: () => ok([update]), sendMessage: () => ok({}) });
+  const linkAccount = mock(() => ({ id: "account-1", email: "vincent@example.com" }));
+
+  await pollOnce(0, { resolveUser: () => null, linkAccount });
+
+  expect(linkAccount).toHaveBeenCalledWith(42, "ABCD2345");
+  expect(sent(callTo(fetch, "sendMessage")).body.text).toContain("Linked to vincent@example.com");
 });
 
 test("a failed reply doesn't stop the batch", async () => {
@@ -56,14 +82,14 @@ test("a failed reply doesn't stop the batch", async () => {
     .mockResolvedValueOnce(Response.json({ ok: false, description: "Forbidden: bot was blocked by the user" }))
     .mockResolvedValueOnce(ok({}));
 
-  expect(await pollOnce(0)).toBe(9);
+  expect(await pollOnce(0, linked())).toBe(9);
   expect(sent(telegram.mock.calls[2]).body.chat_id).toBe(2);
   expect(error.mock.calls[0].join(" ")).toContain("reply to chat 1 failed: Error: telegram sendMessage: Forbidden: bot was blocked by the user");
 });
 
 test("a failed getUpdates throws, so poll can back off", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({ ok: false, description: "Unauthorized" }));
-  await expect(pollOnce(0)).rejects.toThrow("telegram getUpdates: Unauthorized");
+  await expect(pollOnce(0, linked())).rejects.toThrow("telegram getUpdates: Unauthorized");
 });
 
 test("a voice note gets a voice note back, as a reply", async () => {
@@ -85,7 +111,7 @@ test("a voice note gets a voice note back, as a reply", async () => {
     response: "Processed.",
   })) as typeof captureMemory;
 
-  expect(await pollOnce(0, { capture })).toBe(8);
+  expect(await pollOnce(0, linked({ capture }))).toBe(8);
 
   expect(sent(callTo(fetch, "sendChatAction")).body).toEqual({ chat_id: 42, action: "record_voice" });
   expect(callTo(fetch, "/file/bot")[0]).toBe("https://api.telegram.org/file/bot123:abc/voice/file_1.oga");
@@ -110,7 +136,7 @@ test("ECHO=1 shows the indicator, pauses, and resends the voice note by its file
   const spawn = spyOn(Bun, "spawn");
   const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
 
-  await pollOnce(0);
+  await pollOnce(0, linked());
 
   expect(fetch.mock.calls.map(([url]) => String(url).split("/").pop())).toEqual(["getUpdates", "sendChatAction", "sendVoice"]);
   expect(sleep).toHaveBeenCalledTimes(1);
@@ -127,7 +153,7 @@ test("a failure tells the chat to check the logs, and only the logs get the deta
     sendMessage: () => ok({}),
   });
 
-  expect(await pollOnce(0)).toBe(8);
+  expect(await pollOnce(0, linked())).toBe(8);
 
   expect(sent(callTo(fetch, "sendMessage")).body).toEqual({ chat_id: 42, text: "Something broke, check the logs." });
   expect(error.mock.calls[0].join(" ")).toContain("reply to chat 42 failed: Error: telegram getFile: Bad Request: file is too big");
@@ -141,7 +167,7 @@ test("a failed sendChatAction tells the chat to check the logs", async () => {
     sendMessage: () => ok({}),
   });
 
-  expect(await pollOnce(0)).toBe(8);
+  expect(await pollOnce(0, linked())).toBe(8);
 
   expect(sent(callTo(fetch, "sendMessage")).body).toEqual({ chat_id: 42, text: "Something broke, check the logs." });
   expect(error.mock.calls[0].join(" ")).toContain("reply to chat 42 failed: Error: telegram sendChatAction: Bad Request: chat not found");
@@ -175,7 +201,7 @@ test("a text message goes to the harness and gets a text reply, while typing sho
     response: "Ask him about the deployment.",
   })) as typeof captureMemory;
 
-  expect(await pollOnce(0, { capture })).toBe(10);
+  expect(await pollOnce(0, linked({ capture }))).toBe(10);
 
   expect(capture).toHaveBeenCalledWith(expect.objectContaining({ transcript: "What do I need to ask Erik?", source: "telegram" }));
   expect(sent(callTo(fetch, "sendChatAction")).body).toEqual({ chat_id: 42, action: "typing" });
@@ -192,7 +218,7 @@ test("ECHO=1 sends a text message back as is, without the harness", async () => 
   const capture = mock() as unknown as typeof captureMemory;
   spyOn(Bun, "sleep").mockResolvedValue(undefined);
 
-  await pollOnce(0, { capture });
+  await pollOnce(0, linked({ capture }));
 
   expect(capture).not.toHaveBeenCalled();
   expect(sent(callTo(fetch, "sendMessage")).body.text).toBe("What do I need to ask Erik?");

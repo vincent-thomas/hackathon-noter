@@ -90,6 +90,8 @@
   .switch input:disabled + .switch-track { opacity: .5; }
   #briefingStatus { color: #777771; }
   #briefingStatus.error { color: #ff928c; }
+  #linkTelegram { padding: 10px 14px; white-space: nowrap; }
+  #telegramCode { color: #b7df39; font: 700 18px/1 ui-monospace, monospace; letter-spacing: .12em; }
   #logout { width: 100%; padding: 17px 18px; background: transparent; color: #ff928c; text-align: left; font-weight: 600; }
   #logout:hover { background: rgba(255,112,104,.07); }
   @media (max-width: 600px) {
@@ -159,6 +161,15 @@
         </div>
       </div>
     </div>
+    <div class="settings-group" id="telegramSettings" hidden>
+      <p class="settings-label">Telegram</p>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="settings-detail"><strong>Link Telegram</strong><span id="telegramStatus">Generate a one-time code, then send it to your Noter bot.</span><span id="telegramCode"></span></div>
+          <button id="linkTelegram">Generate code</button>
+        </div>
+      </div>
+    </div>
     <div class="settings-group">
       <p class="settings-label">Security & data</p>
       <div class="settings-card">
@@ -191,7 +202,13 @@
   const closeSettingsButton = document.getElementById("closeSettings");
   const briefingToggle = document.getElementById("briefingToggle");
   const briefingStatus = document.getElementById("briefingStatus");
+  const telegramSettings = document.getElementById("telegramSettings");
+  const telegramStatus = document.getElementById("telegramStatus");
+  const telegramCode = document.getElementById("telegramCode");
+  const linkTelegramButton = document.getElementById("linkTelegram");
   let signedInUser;
+
+  if (location.hostname === "localhost" || location.hostname === "127.0.0.1") telegramSettings.hidden = false;
 
   async function api(path, body) {
     const res = await fetch(path, {
@@ -281,6 +298,21 @@
       briefingStatus.className = "error";
     } finally {
       briefingToggle.disabled = false;
+    }
+  };
+
+  linkTelegramButton.onclick = async () => {
+    linkTelegramButton.disabled = true;
+    telegramStatus.textContent = "Generating a secure link code…";
+    telegramCode.textContent = "";
+    try {
+      const link = await api("/api/settings/telegram/link-code", {});
+      telegramStatus.textContent = "Send this command to your Noter bot within 10 minutes:";
+      telegramCode.textContent = `/link ${link.code}`;
+    } catch (error) {
+      telegramStatus.textContent = error.message;
+    } finally {
+      linkTelegramButton.disabled = false;
     }
   };
 
