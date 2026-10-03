@@ -3,24 +3,71 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Noter</title>
 <style>
-  body { margin: 0; min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 2rem;
+  body { margin: 0; min-height: 100vh; display: grid; place-content: center; justify-items: center;
          font: 16px system-ui, sans-serif; background: #111; color: #ccc; }
-  button { width: 120px; height: 120px; border: 0; border-radius: 50%; font-size: 48px; background: #1f6feb; cursor: pointer; }
-  .listening { background: #da3633; animation: pulse 1s infinite; }
+  .orb { position: relative; }
+  .orb canvas { position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 80vmin; height: 80vmin; pointer-events: none; }
+  button { position: relative; display: block; width: 44vmin; height: 44vmin; border: 0; border-radius: 50%; font-size: 18vmin; background: #1f6feb; cursor: pointer; }
+  .listening { background: #da3633; }
   .thinking { opacity: .5; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 24px #da363333; } }
+  #status { position: relative; margin: 1.5rem 0 0; max-width: 32rem; text-align: center; font-size: .85rem; opacity: .6; }
 </style>
-<button id="mic">🎤</button>
+<div class="orb">
+  <canvas id="spectrum"></canvas>
+  <button id="mic">🎤</button>
+</div>
 <p id="status">Tap to talk</p>
 <script>
-  let recorder;
+  let recorder, current;
+
+  // A glowing blob around the mic: 0–6 kHz, where speech lives, mapped onto the rim and mirrored left/right.
+  function showSpectrum(stream) {
+    const audio = (current = new AudioContext());
+    const analyser = audio.createAnalyser();
+    audio.createMediaStreamSource(stream).connect(analyser);
+    const bins = new Uint8Array(analyser.frequencyBinCount).subarray(0, Math.round(6000 / (audio.sampleRate / analyser.fftSize)));
+    const dpr = devicePixelRatio;
+    spectrum.width = spectrum.height = spectrum.offsetWidth * dpr;
+    const points = 64, g = spectrum.getContext("2d"), c = spectrum.width / 2;
+    g.fillStyle = "#da363366";
+    g.shadowColor = "#da3633";
+    g.shadowBlur = 24 * dpr;
+    const base = (mic.offsetWidth / 2 + 4) * dpr, bulge = c - base - g.shadowBlur;
+    // Eases toward 1 while listening and back to 0 after, so the blob grows out of and melts back into the button.
+    let level = 0, target = 1;
+    (function draw() {
+      if (audio !== current) return audio.close();
+      level += (target - level) * 0.08;
+      g.clearRect(0, 0, spectrum.width, spectrum.height);
+      if (target === 0 && level < 0.01) return audio.close();
+      analyser.getByteFrequencyData(bins);
+      g.globalAlpha = level;
+      const rim = Array.from({ length: points }, (_, k) => {
+        const half = k < points / 2 ? k : points - k;
+        const r = base + level * (bins[Math.floor((half * bins.length) / (points / 2 + 1))] / 255) * bulge;
+        const a = (k / points) * 2 * Math.PI - Math.PI / 2;
+        return [c + r * Math.cos(a), c + r * Math.sin(a)];
+      });
+      // Curves through the midpoints between rim points keep the edge smooth.
+      const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      g.beginPath();
+      g.moveTo(...mid(rim[points - 1], rim[0]));
+      rim.forEach((p, k) => g.quadraticCurveTo(...p, ...mid(p, rim[(k + 1) % points])));
+      g.fill();
+      requestAnimationFrame(draw);
+    })();
+    return () => (target = 0);
+  }
+
   mic.onclick = async () => {
     if (recorder?.state === "recording") return recorder.stop();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const chunks = [];
     recorder = new MediaRecorder(stream);
+    const fadeOut = showSpectrum(stream);
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = async () => {
+      fadeOut();
       stream.getTracks().forEach((t) => t.stop());
       mic.className = "thinking";
       const res = await fetch("/api/talk", { method: "POST", headers: { "content-type": recorder.mimeType }, body: new Blob(chunks) });
