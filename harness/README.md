@@ -37,6 +37,37 @@ bun run harness -- query "What do I need to discuss with Erik, and what do we kn
 
 Queries are read-only. The query agent receives `list_memory`, `search_memory`, and `read_memory`, but not `write_memory`. Answers do not expose source paths; `queryMemory()` returns the consulted paths separately in `accessedPaths` for logging and observability.
 
+## Programmatic use
+
+Use JSON mode from any process. Standard output contains exactly one JSON object:
+
+```sh
+bun run harness -- --json capture "Ask Erik about deployment tomorrow"
+bun run harness -- --json query "What do I need to discuss with Erik?"
+```
+
+Query output has the shape:
+
+```json
+{"answer":"You need to discuss deployment.","accessedPaths":["/tasks/ask-erik-about-deployment.md"]}
+```
+
+Or call the TypeScript API directly:
+
+```ts
+import { captureMemory, queryMemoryWorkflow } from "./harness";
+
+await captureMemory({
+  sandboxRoot: "./notes/user-1",
+  transcript: "Ask Erik about deployment tomorrow",
+});
+
+const { answer, accessedPaths } = await queryMemoryWorkflow({
+  sandboxRoot: "./notes/user-1",
+  question: "What do I need to discuss with Erik?",
+});
+```
+
 ## Inspect or debug
 
 Open the low-level storage shell:

@@ -2,9 +2,9 @@
 
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
-import { processCapture, queryMemory } from "./agent";
-import { createInboxCapture } from "./inbox";
+import type { AgentTraceEvent } from "./agent";
 import { MemoryHarness } from "./memory";
+import { captureMemory, queryMemoryWorkflow } from "./workflow";
 
 const HELP = `Commands:
   write <path> <content>  Create a derived memory file
@@ -25,6 +25,7 @@ const USAGE = `Usage:
   bun run harness
   bun run harness -- capture "your unstructured thought"
   bun run harness -- query "what should I focus on today?"
+  bun run harness -- --json query "what should I focus on today?"
   bun run harness -- shell
   bun run harness -- shell list /tasks`;
 
@@ -112,17 +113,19 @@ async function main(): Promise<void> {
   const sandboxRoot = resolve(process.env.MEMORY_ROOT ?? "notes/cli");
   const harness = new MemoryHarness(sandboxRoot);
   const io: CliIO = { write: (message) => console.log(message) };
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const json = rawArgs[0] === "--json";
+  const args = json ? rawArgs.slice(1) : rawArgs;
 
   if (args[0] === "capture") {
     if (args.length < 2) throw new Error(USAGE);
-    await captureAndProcess(sandboxRoot, args.slice(1).join(" "));
+    await captureAndProcess(sandboxRoot, args.slice(1).join(" "), json);
     return;
   }
 
   if (args[0] === "query") {
     if (args.length < 2) throw new Error(USAGE);
-    await query(sandboxRoot, args.slice(1).join(" "));
+    await query(sandboxRoot, args.slice(1).join(" "), json);
     return;
   }
 
@@ -168,24 +171,21 @@ async function main(): Promise<void> {
   }
 }
 
-async function captureAndProcess(sandboxRoot: string, transcript: string): Promise<void> {
+async function captureAndProcess(sandboxRoot: string, transcript: string, json = false): Promise<void> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is required. Add it to .env or export it before running the harness.");
   }
-  const capture = await createInboxCapture(sandboxRoot, { source: "text", transcript });
-  console.log(`\nCaptured ${capture.path}`);
-  console.log("Agent processing…");
+  if (!json) console.log("Agent processing…");
 
-  const result = await processCapture({
+  const result = await captureMemory({
     sandboxRoot,
-    capturePath: capture.path,
+    transcript,
     model: process.env.PI_MODEL,
-    onEvent: (event) => {
-      if (event.type === "tool_start") console.log(`  → ${event.tool} ${JSON.stringify(event.input)}`);
-      if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
-    },
+    onEvent: json ? undefined : printTrace,
   });
 
+  if (json) return console.log(JSON.stringify(result));
+  console.log(`\nCaptured ${result.capture.path}`);
   if (result.createdPaths.length) {
     console.log("\nCreated memory:");
     for (const path of result.createdPaths) console.log(`  ${path}`);
@@ -194,21 +194,32 @@ async function captureAndProcess(sandboxRoot: string, transcript: string): Promi
   }
 }
 
-async function query(sandboxRoot: string, question: string): Promise<void> {
+async function query(sandboxRoot: string, question: string, json = false): Promise<void> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is required. Add it to .env or export it before running the harness.");
   }
-  console.log("Agent searching memory…");
-  const result = await queryMemory({
+  if (!json) console.log("Agent searching memory…");
+  const result = await queryMemoryWorkflow({
     sandboxRoot,
     question,
     model: process.env.PI_MODEL,
-    onEvent: (event) => {
-      if (event.type === "tool_start") console.log(`  → ${event.tool} ${JSON.stringify(event.input)}`);
-      if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
-    },
+    onEvent: json ? undefined : printTrace,
   });
-  console.log(`\n${result.answer}`);
+  console.log(json ? JSON.stringify(result) : `\n${result.answer}`);
 }
 
-if (import.meta.main) await main();
+function printTrace(event: AgentTraceEvent): void {
+  if (event.type === "tool_start") console.log(`  → ${event.tool} ${JSON.stringify(event.input)}`);
+  if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
+}
+
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (process.argv.includes("--json")) console.log(JSON.stringify({ error: message }));
+    else console.error(`Error: ${message}`);
+    process.exitCode = 1;
+  }
+}
