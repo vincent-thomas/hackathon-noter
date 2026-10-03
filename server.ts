@@ -149,9 +149,20 @@ export async function respond(
   transcript: string,
   options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
 ): Promise<string> {
+  const start = performance.now();
   const result = await timed(
     "harness",
-    (options.capture ?? captureMemory)({ sandboxRoot: options.sandboxRoot, transcript, source: options.source }),
+    (options.capture ?? captureMemory)({
+      sandboxRoot: options.sandboxRoot,
+      transcript,
+      source: options.source,
+      // Each tool call costs a model round trip, so these lines show where the harness spends its time.
+      onEvent: (event) => {
+        if (event.type === "tool_start") {
+          console.log(`harness: ${Math.round(performance.now() - start)} ms, ${event.tool} ${JSON.stringify(event.input).slice(0, 120)}`);
+        }
+      },
+    }),
     (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
   );
   return result.response.trim() || "Captured.";

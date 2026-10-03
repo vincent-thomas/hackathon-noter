@@ -30,6 +30,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
     sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
     transcript: "hello there",
     source: "voice",
+    onEvent: expect.any(Function),
   });
 
   const [stt, tts] = gemini.mock.calls;
