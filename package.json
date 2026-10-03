@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:assets": "mkdir -p dist && cp index.html manifest.webmanifest icon-180.png icon-512.png dist/ && cp node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js dist/auth-client.js",
+    "build:assets": "mkdir -p dist && cp frontend/* dist/ && cp manifest.webmanifest icon-180.png icon-512.png dist/ && cp node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js dist/auth-client.js",
     "cf:dev": "bun run build:assets && wrangler dev",
     "cf:types": "wrangler types",
     "cf:check": "tsc -p tsconfig.worker.json && bun run build:assets && wrangler deploy --dry-run",

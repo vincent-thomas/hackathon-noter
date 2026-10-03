@@ -334,7 +334,13 @@ if (import.meta.main) {
   const server = Bun.serve({
     port: 3000,
     routes: {
-      "/": Bun.file(new URL("../index.html", import.meta.url)),
+      "/": Bun.file(new URL("../frontend/index.html", import.meta.url)),
+      "/styles.css": Bun.file(new URL("../frontend/styles.css", import.meta.url)),
+      "/app.js": Bun.file(new URL("../frontend/app.js", import.meta.url)),
+      "/api.js": Bun.file(new URL("../frontend/api.js", import.meta.url)),
+      "/auth.js": Bun.file(new URL("../frontend/auth.js", import.meta.url)),
+      "/settings.js": Bun.file(new URL("../frontend/settings.js", import.meta.url)),
+      "/voice.js": Bun.file(new URL("../frontend/voice.js", import.meta.url)),
       "/manifest.webmanifest": Bun.file(new URL("../manifest.webmanifest", import.meta.url)),
       "/icon-180.png": Bun.file(new URL("../icon-180.png", import.meta.url)),
       "/icon-512.png": Bun.file(new URL("../icon-512.png", import.meta.url)),
