@@ -23,25 +23,8 @@ async function speak(text: string): Promise<Buffer> {
     contents: [{ parts: [{ text }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
   });
-  return wav(Buffer.from(parts.find((p) => p.inlineData).inlineData.data, "base64"));
-}
-
-// Gemini TTS returns bare 24 kHz 16-bit mono PCM; the header makes it playable.
-function wav(pcm: Buffer): Buffer {
-  const h = Buffer.alloc(44);
-  h.write("RIFF", 0);
-  h.writeUInt32LE(36 + pcm.length, 4);
-  h.write("WAVEfmt ", 8);
-  h.writeUInt32LE(16, 16);
-  h.writeUInt16LE(1, 20); // PCM
-  h.writeUInt16LE(1, 22); // mono
-  h.writeUInt32LE(24000, 24);
-  h.writeUInt32LE(48000, 28);
-  h.writeUInt16LE(2, 32);
-  h.writeUInt16LE(16, 34);
-  h.write("data", 36);
-  h.writeUInt32LE(pcm.length, 40);
-  return Buffer.concat([h, pcm]);
+  // Already a complete WAV file, C2PA provenance chunk included.
+  return Buffer.from(parts.find((p) => p.inlineData).inlineData.data, "base64");
 }
 
 // Repeats what you said; the harness goes between transcribe and speak.
