@@ -2,7 +2,7 @@ import { z } from "zod";
 import { authOptions, currentUser, logout, verifyAuthentication, verifyRegistration } from "./cloudflare/auth";
 import { captureMemory, queryMemory } from "./cloudflare/agent";
 import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./cloudflare/briefing";
-import { createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./cloudflare/telegram";
+import { configureTelegramWebhook, createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./cloudflare/telegram";
 import type { Env, User } from "./cloudflare/types";
 
 const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).strict();
@@ -103,7 +103,10 @@ async function api(request: Request, env: Env): Promise<Response | null> {
     catch (error) { return jsonError(error); }
   });
   if (request.method === "POST" && pathname === "/api/settings/telegram/link-code") return withUser(env, request, async (user) => {
-    try { return Response.json(await createTelegramLinkCode(env, user.id)); }
+    try {
+      await configureTelegramWebhook(env, url.origin);
+      return Response.json(await createTelegramLinkCode(env, user.id));
+    }
     catch (error) { return jsonError(error); }
   });
   if (request.method === "POST" && pathname === "/api/capture/text") return withUser(env, request, async (user) => {

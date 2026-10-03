@@ -21,6 +21,17 @@ export async function createTelegramLinkCode(env: Env, userId: string) {
   return { code, expiresAt: new Date(expiresAt).toISOString() };
 }
 
+export async function configureTelegramWebhook(env: Env, origin: string) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) throw new Error("Telegram is not configured");
+  const url = `${origin}/api/telegram/webhook`;
+  await send(env, "setWebhook", {
+    url,
+    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+    allowed_updates: ["message"],
+  });
+  return { configured: true, url };
+}
+
 export async function handleTelegramWebhook(request: Request, env: Env): Promise<Response> {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) return new Response("Telegram is not configured", { status: 503 });
   if (request.headers.get("x-telegram-bot-api-secret-token") !== env.TELEGRAM_WEBHOOK_SECRET) return new Response("Unauthorized", { status: 401 });
