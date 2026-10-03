@@ -43,7 +43,6 @@ test("configures Telegram to call the production webhook with secret verificatio
 // A linked user, empty memory, and fake Telegram and Gemini answering by URL.
 function linkedChat(harnessAnswer: string, harnessStatus = 200) {
   const sent: Array<{ url: string; body: any }> = [];
-  const pcm = new Uint8Array(4800);
   const routes: Array<[string, () => Response]> = [
     ["/getFile", () => Response.json({ ok: true, result: { file_path: "voice/1.oga" } })],
     ["/file/bot", () => new Response("OGG-IN")],
@@ -51,7 +50,6 @@ function linkedChat(harnessAnswer: string, harnessStatus = 200) {
     ["api.condense.chat/openai/v1/chat/completions", () => harnessStatus === 200
       ? Response.json({ choices: [{ message: { role: "assistant", content: harnessAnswer } }] })
       : new Response("overloaded", { status: harnessStatus })],
-    ["streamGenerateContent", () => new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: Buffer.from(pcm).toString("base64") } }] } }] })}\r\n\r\n`)],
     ["api.telegram.org", () => Response.json({ ok: true, result: {} })],
   ];
   spyOn(globalThis, "fetch").mockImplementation((async (url: string, init?: RequestInit) => {
@@ -76,20 +74,13 @@ function linkedChat(harnessAnswer: string, harnessStatus = 200) {
   return { deliver, calls };
 }
 
-test("a voice note gets an MP3 voice note back, with 'recording voice' meanwhile", async () => {
+test("a voice note gets a text reply, with 'typing' meanwhile", async () => {
   const chat = linkedChat("Noted; Sara gets a call tomorrow.");
   await chat.deliver({ voice: { file_id: "F1", mime_type: "audio/ogg" } });
 
-  expect(JSON.parse(chat.calls("sendChatAction")[0].body).action).toBe("record_voice");
-  const form = chat.calls("sendVoice")[0].body as FormData;
-  expect(form.get("chat_id")).toBe("42");
-  expect(JSON.parse(form.get("reply_parameters") as string)).toEqual({ message_id: 7 });
-  const voice = form.get("voice") as Blob;
-  expect(voice.type).toBe("audio/mpeg");
-  const head = new Uint8Array(await voice.arrayBuffer()).subarray(0, 2);
-  // An MP3 frame starts with 11 set bits.
-  expect(head[0] === 0xff && (head[1] & 0xe0) === 0xe0).toBe(true);
-  expect(chat.calls("sendMessage")).toEqual([]);
+  expect(JSON.parse(chat.calls("sendChatAction")[0].body).action).toBe("typing");
+  expect(JSON.parse(chat.calls("sendMessage")[0].body)).toEqual({ chat_id: "42", text: "Noted; Sara gets a call tomorrow.", reply_parameters: { message_id: 7 } });
+  expect(chat.calls("sendVoice")).toEqual([]);
 });
 
 test("a text message gets a text reply, with 'typing' meanwhile", async () => {

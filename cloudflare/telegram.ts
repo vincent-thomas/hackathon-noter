@@ -1,7 +1,6 @@
 import { captureMemory } from "./agent";
 import type { Env, User } from "./types";
-import { speakStream, transcribe } from "../gemini";
-import { toMp3 } from "../mp3";
+import { transcribe } from "../gemini";
 
 const LINK_TTL_MS = 10 * 60_000;
 const TELEGRAM_API = "https://api.telegram.org";
@@ -72,7 +71,6 @@ async function handleMessage(env: Env, message: any) {
     return;
   }
   console.log(`telegram: ${voice ? `voice note, ${message.voice.duration} s` : `text ${JSON.stringify(message.text)}`} from user ${user.id} in chat ${chatId}`);
-  // Answered in kind: a voice note for a voice note, text for text.
   try {
     await answer(env, chatId, user, message, reply, voice);
   } catch (error) {
@@ -83,23 +81,16 @@ async function handleMessage(env: Env, message: any) {
 }
 
 async function answer(env: Env, chatId: string, user: User, message: any, reply: { message_id: number }, voice: string | undefined) {
-  await whileShowing(env, chatId, voice ? "record_voice" : "typing", async () => {
+  await whileShowing(env, chatId, "typing", async () => {
     const transcript = voice ? await transcribeVoice(env, voice, message.voice.mime_type ?? "audio/ogg") : message.text;
     const response = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "I didn't catch that.";
-    if (!voice) return () => send(env, "sendMessage", { chat_id: chatId, text: response, reply_parameters: reply });
-    const pcm: Uint8Array[] = [];
-    for await (const chunk of speakStream(env.GEMINI_API_KEY, response)) pcm.push(chunk);
-    const form = new FormData();
-    form.append("chat_id", chatId);
-    form.append("reply_parameters", JSON.stringify(reply));
-    form.append("voice", new Blob([toMp3(concat(pcm))], { type: "audio/mpeg" }), "reply.mp3");
-    return () => send(env, "sendVoice", form);
+    return () => send(env, "sendMessage", { chat_id: chatId, text: response, reply_parameters: reply });
   });
 }
 
 // Shows `action` while `prepare` works out the reply. Telegram drops it after 5 s, so it's resent;
 // it stops before the reply goes out.
-async function whileShowing(env: Env, chatId: string, action: "typing" | "record_voice", prepare: () => Promise<() => Promise<unknown>>) {
+async function whileShowing(env: Env, chatId: string, action: "typing", prepare: () => Promise<() => Promise<unknown>>) {
   const show = () => send(env, "sendChatAction", { chat_id: chatId, action }).catch(() => {});
   await show();
   const timer = setInterval(show, 4000);
@@ -112,16 +103,6 @@ async function whileShowing(env: Env, chatId: string, action: "typing" | "record
   const start = performance.now();
   await reply();
   console.log(`telegram: replied to chat ${chatId} in ${Math.round(performance.now() - start)} ms`);
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-  const all = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    all.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return all;
 }
 
 async function consumeCode(env: Env, chatId: string, code: string): Promise<User | null> {
