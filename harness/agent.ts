@@ -11,7 +11,7 @@ import { createMemoryTools } from "./tools";
 
 export const MEMORY_AGENT_SYSTEM_PROMPT = `You maintain the user's external memory.
 
-The user gives the system unstructured captures containing thoughts, tasks, facts, ideas, plans, observations, and other information.
+The user gives the system unstructured transcripts containing thoughts, tasks, facts, ideas, plans, observations, questions, and mixtures of these.
 
 The /inbox directory contains raw source captures written by the backend. You may read and search /inbox, but you may never write to it. Everything outside /inbox is derived memory.
 
@@ -19,8 +19,10 @@ Existing memory files are immutable. write_memory can only create new files and 
 
 When processing a capture:
 - Read the raw capture first.
+- Treat the whole transcript as one interaction: retain useful new information and answer any questions it contains.
 - Determine which information has future value and is useful to retain.
 - Search existing memory when previous context may help interpret the capture or avoid duplication.
+- For questions, search and read enough existing memory to give a grounded answer. Do not include file paths or a Sources section in the response; the harness tracks provenance separately.
 - Create useful derived memories with write_memory.
 - Create multiple memories when a capture contains meaningfully separate information.
 - Use /tasks for actionable commitments, /events for time-associated information, and /memory for other durable context. These are soft categories.
@@ -29,8 +31,10 @@ When processing a capture:
 - Preserve relevant context and uncertainty.
 - Do not force every input into a task.
 - Do not invent facts the user did not provide.
+- Do not create derived memory merely because the user asked a question.
 - If new information changes older memory, create a new memory describing the update rather than editing the old file.
-- Supply a new unique id and the current offset-aware ISO timestamp for every write.`;
+- Supply a new unique id and the current offset-aware ISO timestamp for every write.
+- End with a concise response for the user. Answer embedded questions directly. If there was no question, briefly acknowledge the capture without listing implementation details or created paths.`;
 
 export const MEMORY_QUERY_SYSTEM_PROMPT = `You answer questions using the user's external memory.
 
@@ -62,9 +66,10 @@ export async function processCapture(options: {
   capturePath: string;
   model?: string;
   onEvent?: (event: AgentTraceEvent) => void;
-}): Promise<{ createdPaths: string[]; response: string }> {
+}): Promise<{ createdPaths: string[]; accessedPaths: string[]; response: string }> {
   const harness = new MemoryHarness(options.sandboxRoot);
   const before = new Set((await harness.searchMemory({})).files.map((file) => file.path));
+  const accessedPaths = new Set<string>();
   const tools = createMemoryTools(harness);
   const cwd = resolve(import.meta.dir, "..");
   const loader = new DefaultResourceLoader({
@@ -98,6 +103,7 @@ export async function processCapture(options: {
       options.onEvent?.({ type: "tool_start", tool: event.toolName, input: event.args });
     } else if (event.type === "tool_execution_end") {
       options.onEvent?.({ type: "tool_end", tool: event.toolName, isError: event.isError });
+      if (!event.isError) trackAccessedPaths(event.toolName, event.result?.details, accessedPaths);
     }
   });
 
@@ -112,6 +118,7 @@ Process it into useful durable memory.`);
     const after = await harness.searchMemory({});
     return {
       createdPaths: after.files.map((file) => file.path).filter((path) => !before.has(path)),
+      accessedPaths: [...accessedPaths].sort(),
       response,
     };
   } finally {

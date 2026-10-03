@@ -11,7 +11,7 @@ echo GEMINI_API_KEY=your-key > .env
 docker compose up
 ```
 
-Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said, and a Gemini voice confirms that it was captured after the memory agent finishes.
+Open http://localhost:3000. Tap the mic, talk, tap again. A single recording can contain information to remember, questions about existing memory, or both. The agent stores useful new information and speaks its answer; a capture without a question receives a short acknowledgement.
 
 The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
 
@@ -25,10 +25,10 @@ curl -sS localhost:3000/api/capture/text \
   -d '{"text":"Ask Erik about deployment tomorrow"}'
 ```
 
-The response includes the immutable inbox capture and any derived paths created by the agent:
+The response includes the immutable inbox capture, derived paths, files consulted by the agent, and its user-facing response. Questions can be included in the same text as information to remember:
 
 ```json
-{"capture":{"path":"/inbox/...md","id":"..."},"createdPaths":["/tasks/ask-erik-about-deployment.md"],"response":"..."}
+{"capture":{"path":"/inbox/...md","id":"..."},"createdPaths":["/tasks/ask-erik-about-deployment.md"],"accessedPaths":[],"response":"Captured."}
 ```
 
 Query accumulated memory:

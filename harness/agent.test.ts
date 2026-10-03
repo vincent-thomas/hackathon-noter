@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
+import { MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
 
 test("uses Gemini 3.8 Flash through Pi's Google Flash transport", () => {
   const model = resolveGoogleModel("gemini-3.8-flash");
@@ -28,4 +28,10 @@ test("tracks files consulted through read, search, and list tools", () => {
     "/memory/startup.md",
     "/tasks/erik.md",
   ]);
+});
+
+test("capture agent supports memory and questions in the same transcript", () => {
+  expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("retain useful new information and answer any questions");
+  expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("Do not create derived memory merely because the user asked a question");
+  expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("Answer embedded questions directly");
 });

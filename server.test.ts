@@ -8,7 +8,7 @@ const heard = (text: string) =>
 const spoken = () =>
   Response.json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/wav", data: WAV.toString("base64") } }] } }] });
 const remembered = (createdPaths = ["/tasks/hello.md"]) =>
-  mock(async () => ({ capture: { path: "/inbox/capture.md", id: "capture" }, createdPaths, response: "Processed." })) as typeof captureMemory;
+  mock(async () => ({ capture: { path: "/inbox/capture.md", id: "capture" }, createdPaths, accessedPaths: [], response: "Processed." })) as typeof captureMemory;
 const post = (capture = remembered()) =>
   talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }), capture);
 const sent = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
@@ -20,7 +20,7 @@ afterEach(() => mock.restore());
 const proc = (stdout: string, code = 0, stderr = "") =>
   ({ stdout: new Response(stdout).body, stderr: new Response(stderr).body, exited: Promise.resolve(code) }) as any;
 
-test("talk transcribes, persists through the memory harness, and acknowledges the capture", async () => {
+test("talk transcribes, runs the unified memory interaction, and speaks its response", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
   const capture = remembered();
   const res = await post(capture);
@@ -36,7 +36,7 @@ test("talk transcribes, persists through the memory harness, and acknowledges th
   expect(sent(stt).contents[0].parts[0].inlineData).toEqual({ mimeType: "audio/webm", data: "YWJj" });
   expect(tts[0]).toContain("gemini-3.8-flash-tts:generateContent");
   expect(sent(tts)).toEqual({
-    contents: [{ parts: [{ text: "Captured." }] }],
+    contents: [{ parts: [{ text: "Processed." }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
   });
 

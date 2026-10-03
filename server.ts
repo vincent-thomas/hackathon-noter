@@ -121,7 +121,7 @@ export async function converse(
       }),
       (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
     );
-    answer = "Captured.";
+    answer = result.response.trim() || "Captured.";
   }
   const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };

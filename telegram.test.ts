@@ -79,6 +79,7 @@ test("a voice note gets a voice note back, as a reply", async () => {
   const capture = mock(async () => ({
     capture: { path: "/inbox/capture.md", id: "capture" },
     createdPaths: ["/tasks/buy-milk.md"],
+    accessedPaths: [],
     response: "Processed.",
   })) as typeof captureMemory;
 
