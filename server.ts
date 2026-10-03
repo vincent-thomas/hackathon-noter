@@ -29,13 +29,13 @@ async function speak(text: string): Promise<Buffer> {
   return Buffer.from(parts.find((p) => p.inlineData).inlineData.data, "base64");
 }
 
-// Users don't exist yet; everyone is root.
-const USER = "root";
+// Users don't exist yet; every request belongs to user 1.
+const USER_ID = 1;
 
 // One throwaway container per request. The user's notes folder is its only writable path.
 // The proof-of-concept harness just files the transcript and reports the count.
 async function harness(transcript: string): Promise<string> {
-  const notes = `${import.meta.dir}/notes/${USER}`;
+  const notes = `${import.meta.dir}/notes/${USER_ID}`;
   await mkdir(notes, { recursive: true });
   const proc = Bun.spawn([
     "docker", "run", "--rm", "-i", "--network", "none", "--cap-drop", "ALL", "--memory", "256m", "--read-only",

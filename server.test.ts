@@ -32,8 +32,8 @@ test("talk transcribes the recording, runs the harness in a sandbox, and speaks 
   expect(cmd.slice(0, 3)).toEqual(["docker", "run", "--rm"]);
   expect(cmd).toContain("--read-only");
   expect(cmd.join(" ")).toContain("--network none");
-  expect(cmd.join(" ")).toContain(`-v ${import.meta.dir}/notes/root:/notes`);
-  expect(existsSync(`${import.meta.dir}/notes/root`)).toBe(true);
+  expect(cmd.join(" ")).toContain(`-v ${import.meta.dir}/notes/1:/notes`);
+  expect(existsSync(`${import.meta.dir}/notes/1`)).toBe(true);
   expect(await opts.stdin.text()).toBe("hello there");
 
   const [stt, tts] = gemini.mock.calls;

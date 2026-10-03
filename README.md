@@ -19,7 +19,7 @@ The project folder is mounted into the container. Saving `server.ts` restarts th
 
 Each request runs the harness in a new `alpine` container with no network, no Linux capabilities, 256 MB of memory and a read-only filesystem. The container is deleted when it exits. The first request is slow while Docker pulls `alpine`.
 
-Notes are plain files in `notes/<user>/` in the project folder (gitignored). There are no users yet, so everything goes to `notes/root/`. Each sandbox gets only its user's folder, mounted at `/notes`, and that is the only place the harness can write. To start over, delete the folder.
+Notes are plain files in `notes/<user id>/` in the project folder (gitignored). There are no users yet, so every request belongs to user 1 and everything goes to `notes/1/`. Each sandbox gets only its user's folder, mounted at `/notes`, and that is the only place the harness can write. To start over, delete the folder.
 
 Docker mounts that folder through the host's Docker daemon, so the app container sees the project at the same absolute path as your machine. Run `docker compose` from the project folder; it uses `$PWD` for that path.
 
