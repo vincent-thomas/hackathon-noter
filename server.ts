@@ -47,15 +47,21 @@ async function harness(transcript: string): Promise<string> {
   return out.trim();
 }
 
+// Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
+export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ transcript: string; reply: Buffer }> {
+  const transcript = await transcribe(audio, mimeType);
+  const reply = await speak(transcript ? await harness(transcript) : "I didn't catch that.");
+  return { transcript, reply };
+}
+
 export async function talk(req: Request): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
   if (process.env.ECHO === "1") return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   try {
-    const transcript = await transcribe(recording, mimeType);
-    const audio = await speak(transcript ? await harness(transcript) : "I didn't catch that.");
-    return new Response(audio, { headers: { "content-type": "audio/wav", "x-transcript": encodeURIComponent(transcript) } });
+    const { transcript, reply } = await converse(recording, mimeType);
+    return new Response(reply, { headers: { "content-type": "audio/wav", "x-transcript": encodeURIComponent(transcript) } });
   } catch (err) {
     return new Response(String(err), { status: 502 });
   }
