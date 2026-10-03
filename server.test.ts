@@ -16,12 +16,9 @@ afterEach(() => {
   delete process.env.ECHO;
 });
 
-const sandbox = (stdout: string, code = 0, stderr = "") =>
-  spyOn(Bun, "spawn").mockReturnValue({
-    stdout: new Response(stdout).body,
-    stderr: new Response(stderr).body,
-    exited: Promise.resolve(code),
-  } as any);
+const proc = (stdout: string, code = 0, stderr = "") =>
+  ({ stdout: new Response(stdout).body, stderr: new Response(stderr).body, exited: Promise.resolve(code) }) as any;
+const sandbox = (stdout: string, code = 0, stderr = "") => spyOn(Bun, "spawn").mockReturnValue(proc(stdout, code, stderr));
 
 test("talk transcribes the recording, runs the harness in a sandbox, and speaks its reply", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
@@ -48,6 +45,22 @@ test("talk transcribes the recording, runs the harness in a sandbox, and speaks 
   expect(res.headers.get("content-type")).toBe("audio/wav");
   expect(decodeURIComponent(res.headers.get("x-transcript")!)).toBe("hello there");
   expect(Buffer.from(await res.arrayBuffer())).toEqual(WAV);
+});
+
+test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
+  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("The sandbox heard: hello there.")).mockReturnValueOnce(proc("OggS..."));
+  const res = await talk(
+    new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/ogg", accept: "audio/ogg" }, body: "abc" }),
+  );
+
+  const [cmd, opts] = spawn.mock.calls[1] as [string[], { stdin: Blob }];
+  expect(cmd[0]).toBe("ffmpeg");
+  expect(cmd.join(" ")).toContain("-c:a libopus");
+  expect(cmd.join(" ")).toContain("-f ogg");
+  expect(Buffer.from(await opts.stdin.arrayBuffer())).toEqual(WAV);
+  expect(res.headers.get("content-type")).toBe("audio/ogg");
+  expect(await res.text()).toBe("OggS...");
 });
 
 test("talk says so when it heard nothing, without starting a sandbox", async () => {

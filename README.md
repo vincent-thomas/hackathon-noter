@@ -25,6 +25,16 @@ Docker mounts that folder through the host's Docker daemon, so the app container
 
 The app container gets the Docker socket so it can start sandboxes. That gives it root on your machine, so keep this setup on your own laptop.
 
+## Voice notes
+
+WhatsApp and Telegram send and play voice notes as OGG/Opus. Ask `/api/talk` for `audio/ogg` and the reply comes back in that format, converted by ffmpeg. To try a round trip without either app:
+
+```sh
+curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/ogg' localhost:3000/api/talk -o reply.ogg
+```
+
+The web page doesn't ask for OGG, so it keeps getting WAV.
+
 ## Debugging
 
 To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and restart with `docker compose up`. The server then plays your recording back without calling Gemini.

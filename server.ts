@@ -59,6 +59,12 @@ export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ 
   return { transcript, reply };
 }
 
+// WhatsApp and Telegram only show OGG/Opus as a voice note.
+export function toVoiceNote(wav: Buffer): Promise<Buffer> {
+  return run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav);
+}
+
+// Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
 export async function talk(req: Request): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
@@ -66,7 +72,10 @@ export async function talk(req: Request): Promise<Response> {
   if (process.env.ECHO === "1") return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   try {
     const { transcript, reply } = await converse(recording, mimeType);
-    return new Response(reply, { headers: { "content-type": "audio/wav", "x-transcript": encodeURIComponent(transcript) } });
+    const voiceNote = req.headers.get("accept")?.includes("audio/ogg");
+    return new Response(voiceNote ? await toVoiceNote(reply) : reply, {
+      headers: { "content-type": voiceNote ? "audio/ogg" : "audio/wav", "x-transcript": encodeURIComponent(transcript) },
+    });
   } catch (err) {
     return new Response(String(err), { status: 502 });
   }
