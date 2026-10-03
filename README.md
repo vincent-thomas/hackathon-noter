@@ -69,7 +69,7 @@ notes/users/<user-id>/
 
 Account, passkey, challenge, and session state is stored in `notes/accounts.sqlite`. The backend creates immutable raw files under `/inbox`. The Pi agent receives only the typed `read_memory`, `list_memory`, `search_memory`, and create-only `write_memory` tools. It has no shell or raw filesystem tool and cannot write to `/inbox`.
 
-Telegram chats are isolated separately under `notes/telegram/<chat-id>/`; passkey accounts and Telegram accounts are not linked in V0.
+Telegram requires a linked passkey account and uses that account's `notes/users/<user-id>/` memory. Unlinked chats cannot invoke Gemini or the harness.
 
 Programmatic capture and query APIs remain available under [`harness/`](harness/README.md).
 
@@ -93,13 +93,15 @@ The web page asks for this stream and plays it as it arrives.
 
 1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`.
 2. Put the token it gives you into `.env` as `TELEGRAM_BOT_TOKEN=…`, then restart with `docker compose up`.
-3. Send your bot a voice note or a text message. It answers in kind, as a reply to yours: a voice note for a voice note, text for text. Anything else gets "Send me a voice note or a text message."
+3. Sign in to the locally running Noter website, open Settings, and select **Generate code** under Telegram.
+4. Send `/link CODE` to the bot within 10 minutes.
+5. Send your bot a voice note or text message. It uses the same memory as your web account and answers in kind.
 
 With `ECHO=1` the bot sends your own voice note or text straight back after a short pause, without calling Gemini. If something breaks, the chat only gets "Something broke, check the logs." and the details go to `docker compose logs`.
 
 The bot asks Telegram for new messages itself, so it needs no public URL. Keep the token secret: whoever has it controls the bot. If it leaks, send `/revoke` to BotFather.
 
-**Temporary: Telegram has no allowlist.** Anyone who finds the bot can use it, although each chat now has isolated memory. Add an allowlist of Telegram user IDs before sharing the bot's username.
+An unlinked Telegram chat receives linking instructions and cannot call Gemini or access memory. Link codes are single-use, expire after 10 minutes, and require an authenticated Noter session to create.
 
 ## Debugging
 

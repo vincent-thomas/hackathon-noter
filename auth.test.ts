@@ -100,6 +100,19 @@ test("stores morning briefing preference and timezone", async () => {
   expect(() => auth.updateBriefingSettings(userId, { enabled: true, timezone: "not/a-zone" })).toThrow("invalid timezone");
 });
 
+test("requires a one-time code to link a Telegram chat to an account", async () => {
+  const auth = await setup();
+  const userId = crypto.randomUUID();
+  auth.db.query("INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
+    .run(userId, "vincent", "vincent@example.com", Date.now());
+
+  expect(auth.telegramUser(42)).toBeNull();
+  const { code } = auth.createTelegramLinkCode(userId);
+  expect(auth.linkTelegram(42, code)).toMatchObject({ id: userId, email: "vincent@example.com" });
+  expect(auth.telegramUser(42)).toMatchObject({ id: userId });
+  expect(() => auth.linkTelegram(43, code)).toThrow("invalid or expired link code");
+});
+
 test("accepts any email address with an @", async () => {
   const auth = await setup();
   for (const email of ["a@b", "ÅSA@exempel.se", "first.last+notes@sub.example.co.uk"]) {

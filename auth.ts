@@ -14,6 +14,7 @@ import { z } from "zod";
 const SESSION_COOKIE = "noter_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 const CHALLENGE_SECONDS = 5 * 60;
+const TELEGRAM_LINK_SECONDS = 10 * 60;
 
 // Deliberately loose: an address only needs an @. Strict format checks reject real addresses.
 const EmailInput = z.object({ email: z.string().trim().toLowerCase().includes("@").max(254) }).strict();
@@ -74,6 +75,16 @@ export class PasskeyAuth {
         expires_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS telegram_links (
+        chat_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS telegram_link_codes (
         token_hash TEXT PRIMARY KEY,
         user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         expires_at INTEGER NOT NULL
@@ -232,6 +243,36 @@ export class PasskeyAuth {
     return this.briefingSettings(userId);
   }
 
+  createTelegramLinkCode(userId: string): { code: string; expiresAt: string } {
+    if (!this.db.query("SELECT 1 FROM users WHERE id = ?").get(userId)) throw new Error("account not found");
+    const code = telegramCode();
+    const expiresAt = Date.now() + TELEGRAM_LINK_SECONDS * 1000;
+    this.db.query("DELETE FROM telegram_link_codes WHERE expires_at <= ? OR user_id = ?").run(Date.now(), userId);
+    this.db.query("INSERT INTO telegram_link_codes (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
+      .run(hash(code), userId, expiresAt);
+    return { code, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  linkTelegram(chatId: string | number, code: string): AuthUser {
+    const normalized = code.trim().toUpperCase();
+    const link = this.db.query("SELECT user_id, expires_at FROM telegram_link_codes WHERE token_hash = ?")
+      .get(hash(normalized)) as { user_id: string; expires_at: number } | null;
+    this.db.query("DELETE FROM telegram_link_codes WHERE token_hash = ?").run(hash(normalized));
+    if (!link || link.expires_at <= Date.now()) throw new Error("invalid or expired link code");
+    this.db.query(`INSERT INTO telegram_links (chat_id, user_id, created_at) VALUES (?, ?, ?)
+      ON CONFLICT(chat_id) DO UPDATE SET user_id = excluded.user_id, created_at = excluded.created_at`)
+      .run(String(chatId), link.user_id, Date.now());
+    const user = this.db.query("SELECT id, name, email FROM users WHERE id = ?").get(link.user_id) as AuthUser | null;
+    if (!user) throw new Error("account not found");
+    return user;
+  }
+
+  telegramUser(chatId: string | number): AuthUser | null {
+    return this.db.query(`SELECT users.id, users.name, users.email FROM telegram_links
+      JOIN users ON users.id = telegram_links.user_id WHERE telegram_links.chat_id = ?`)
+      .get(String(chatId)) as AuthUser | null;
+  }
+
   #challenge(type: ChallengeRow["type"], challenge: string, userId?: string, name?: string): string {
     this.db.query("DELETE FROM challenges WHERE expires_at <= ?").run(Date.now());
     const id = crypto.randomUUID();
@@ -258,6 +299,12 @@ export class PasskeyAuth {
 
 function randomToken(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+}
+
+function telegramCode(): string {
+  const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 function hash(value: string): string {
