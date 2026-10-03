@@ -90,8 +90,12 @@ test("talk surfaces a Gemini failure", async () => {
 test("ECHO=1 plays the recording back without calling Gemini", async () => {
   process.env.ECHO = "1";
   const gemini = spyOn(globalThis, "fetch");
+  const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
   const res = await post();
   expect(gemini).not.toHaveBeenCalled();
+  const [ms] = sleep.mock.calls[0] as [number];
+  expect(ms).toBeGreaterThanOrEqual(500);
+  expect(ms).toBeLessThanOrEqual(1000);
   expect(res.headers.get("content-type")).toBe("audio/webm");
   expect(res.headers.get("x-transcript")).toBe("(echo)");
   expect(await res.text()).toBe("abc");

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { pollOnce } from "./telegram";
+import { pollOnce, repeat } from "./telegram";
 import type { captureMemory } from "./harness";
 
 const ok = (result: unknown) => Response.json({ ok: true, result });
@@ -27,9 +27,9 @@ afterEach(() => {
   delete process.env.TELEGRAM_BOT_TOKEN;
 });
 
-test("pollOnce long-polls for messages and asks for a voice note", async () => {
+test("pollOnce long-polls for messages and asks for a voice note or text", async () => {
   const telegram = spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(ok([{ update_id: 7, message: { chat: { id: 42 }, text: "hi" } }]))
+    .mockResolvedValueOnce(ok([{ update_id: 7, message: { chat: { id: 42 }, photo: [] } }]))
     .mockResolvedValueOnce(ok({}));
 
   expect(await pollOnce(5)).toBe(8);
@@ -38,7 +38,7 @@ test("pollOnce long-polls for messages and asks for a voice note", async () => {
   expect(getUpdates.url).toBe("https://api.telegram.org/bot123:abc/getUpdates");
   expect(getUpdates.body).toEqual({ offset: 5, timeout: 50, allowed_updates: ["message"] });
   expect(sendMessage.url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
-  expect(sendMessage.body).toEqual({ chat_id: 42, text: "Send me a voice note." });
+  expect(sendMessage.body).toEqual({ chat_id: 42, text: "Send me a voice note or a text message." });
 });
 
 test("pollOnce keeps the offset when there is nothing new", async () => {
@@ -69,6 +69,7 @@ test("a failed getUpdates throws, so poll can back off", async () => {
 test("a voice note gets a voice note back, as a reply", async () => {
   const fetch = routes({
     getUpdates: () => ok([voiceUpdate]),
+    sendChatAction: () => ok(true),
     getFile: () => ok({ file_path: "voice/file_1.oga" }),
     "/file/bot": () => new Response("OGG-IN"),
     "gemini-3.5-transcribe": () => Response.json({ candidates: [{ content: { parts: [{ audioTranscription: { text: "buy milk" } }] } }] }),
@@ -85,6 +86,7 @@ test("a voice note gets a voice note back, as a reply", async () => {
 
   expect(await pollOnce(0, { capture })).toBe(8);
 
+  expect(sent(callTo(fetch, "sendChatAction")).body).toEqual({ chat_id: 42, action: "record_voice" });
   expect(callTo(fetch, "/file/bot")[0]).toBe("https://api.telegram.org/file/bot123:abc/voice/file_1.oga");
   expect(sent(callTo(fetch, "gemini-3.5-transcribe")).body.contents[0].parts[0].inlineData).toEqual({
     mimeType: "audio/ogg",
@@ -98,14 +100,16 @@ test("a voice note gets a voice note back, as a reply", async () => {
   expect(await (form.get("voice") as Blob).text()).toBe("OGG-OUT");
 });
 
-test("ECHO=1 resends the voice note by its file ID without downloading it", async () => {
+test("ECHO=1 shows the indicator, pauses, and resends the voice note by its file ID", async () => {
   process.env.ECHO = "1";
-  const fetch = routes({ getUpdates: () => ok([voiceUpdate]), sendVoice: () => ok({}) });
+  const fetch = routes({ getUpdates: () => ok([voiceUpdate]), sendChatAction: () => ok(true), sendVoice: () => ok({}) });
   const spawn = spyOn(Bun, "spawn");
+  const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
 
   await pollOnce(0);
 
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls.map(([url]) => String(url).split("/").pop())).toEqual(["getUpdates", "sendChatAction", "sendVoice"]);
+  expect(sleep).toHaveBeenCalledTimes(1);
   expect(spawn).not.toHaveBeenCalled();
   expect(sent(callTo(fetch, "sendVoice")).body).toEqual({ chat_id: 42, voice: "F1", reply_parameters: { message_id: 3 } });
 });
@@ -114,6 +118,7 @@ test("a failure tells the chat to check the logs, and only the logs get the deta
   const error = spyOn(console, "error").mockImplementation(() => {});
   const fetch = routes({
     getUpdates: () => ok([voiceUpdate]),
+    sendChatAction: () => ok(true),
     getFile: () => Response.json({ ok: false, description: "Bad Request: file is too big" }),
     sendMessage: () => ok({}),
   });
@@ -122,4 +127,69 @@ test("a failure tells the chat to check the logs, and only the logs get the deta
 
   expect(sent(callTo(fetch, "sendMessage")).body).toEqual({ chat_id: 42, text: "Something broke, check the logs." });
   expect(error.mock.calls[0].join(" ")).toContain("reply to chat 42 failed: Error: telegram getFile: Bad Request: file is too big");
+});
+
+test("a failed sendChatAction tells the chat to check the logs", async () => {
+  const error = spyOn(console, "error").mockImplementation(() => {});
+  const fetch = routes({
+    getUpdates: () => ok([voiceUpdate]),
+    sendChatAction: () => Response.json({ ok: false, description: "Bad Request: chat not found" }),
+    sendMessage: () => ok({}),
+  });
+
+  expect(await pollOnce(0)).toBe(8);
+
+  expect(sent(callTo(fetch, "sendMessage")).body).toEqual({ chat_id: 42, text: "Something broke, check the logs." });
+  expect(error.mock.calls[0].join(" ")).toContain("reply to chat 42 failed: Error: telegram sendChatAction: Bad Request: chat not found");
+});
+
+test("repeat runs a task on an interval until stopped, and reports failures", async () => {
+  const errors: unknown[] = [];
+  let runs = 0;
+  const stop = repeat(async () => {
+    if (++runs === 2) throw new Error("boom");
+  }, 10, (err) => errors.push(err));
+
+  await Bun.sleep(35);
+  stop();
+  const stopped = runs;
+  await Bun.sleep(30);
+
+  expect(stopped).toBeGreaterThanOrEqual(2);
+  expect(runs).toBe(stopped);
+  expect(String(errors)).toBe("Error: boom");
+});
+
+const textUpdate = { update_id: 9, message: { message_id: 5, chat: { id: 42 }, text: "What do I need to ask Erik?" } };
+
+test("a text message goes to the harness and gets a text reply, while typing shows", async () => {
+  const fetch = routes({ getUpdates: () => ok([textUpdate]), sendChatAction: () => ok(true), sendMessage: () => ok({}) });
+  const capture = mock(async () => ({
+    capture: { path: "/inbox/capture.md", id: "capture" },
+    createdPaths: [],
+    accessedPaths: [],
+    response: "Ask him about the deployment.",
+  })) as typeof captureMemory;
+
+  expect(await pollOnce(0, { capture })).toBe(10);
+
+  expect(capture).toHaveBeenCalledWith(expect.objectContaining({ transcript: "What do I need to ask Erik?", source: "telegram" }));
+  expect(sent(callTo(fetch, "sendChatAction")).body).toEqual({ chat_id: 42, action: "typing" });
+  expect(sent(callTo(fetch, "sendMessage")).body).toEqual({
+    chat_id: 42,
+    text: "Ask him about the deployment.",
+    reply_parameters: { message_id: 5 },
+  });
+});
+
+test("ECHO=1 sends a text message back as is, without the harness", async () => {
+  process.env.ECHO = "1";
+  const fetch = routes({ getUpdates: () => ok([textUpdate]), sendChatAction: () => ok(true), sendMessage: () => ok({}) });
+  const capture = mock() as unknown as typeof captureMemory;
+  spyOn(Bun, "sleep").mockResolvedValue(undefined);
+
+  await pollOnce(0, { capture });
+
+  expect(capture).not.toHaveBeenCalled();
+  expect(sent(callTo(fetch, "sendMessage")).body.text).toBe("What do I need to ask Erik?");
 });

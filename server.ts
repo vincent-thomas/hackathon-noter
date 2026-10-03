@@ -100,7 +100,20 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
   return result;
 }
 
-// Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
+// Transcript in, the harness's answer out. Every channel, voice or text, goes through here.
+export async function respond(
+  transcript: string,
+  options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
+): Promise<string> {
+  const result = await timed(
+    "harness",
+    (options.capture ?? captureMemory)({ sandboxRoot: options.sandboxRoot, transcript, source: options.source }),
+    (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
+  );
+  return result.response.trim() || "Captured.";
+}
+
+// Audio in, spoken WAV reply out. Every voice channel goes through here.
 export async function converse(
   audio: ArrayBuffer,
   mimeType: string,
@@ -108,19 +121,13 @@ export async function converse(
 ): Promise<{ transcript: string; reply: Bytes }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
-  let answer = "I didn't catch that.";
-  if (transcript) {
-    const result = await timed(
-      "harness",
-      (options.capture ?? captureMemory)({
+  const answer = transcript
+    ? await respond(transcript, {
         sandboxRoot: options.sandboxRoot,
-        transcript,
         source: options.source ?? "voice",
-      }),
-      (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
-    );
-    answer = result.response.trim() || "Captured.";
-  }
+        capture: options.capture,
+      })
+    : "I didn't catch that.";
   const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };
 }
@@ -130,6 +137,9 @@ export function toVoiceNote(wav: Bytes): Promise<Bytes> {
   return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
 }
 
+// A real reply takes seconds; this pause lets echo mode show the waiting indicators too.
+export const echoDelay = () => Bun.sleep(500 + Math.random() * 500);
+
 // Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
 export async function talk(req: Request, userId: string, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   const recording = await req.arrayBuffer();
@@ -137,6 +147,7 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
   if (process.env.ECHO === "1") {
     console.log(`echo: ${kb(recording)} of ${mimeType}`);
+    await echoDelay();
     return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   }
   try {
