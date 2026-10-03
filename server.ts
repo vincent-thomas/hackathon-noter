@@ -32,7 +32,12 @@ async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string>
 
 // The lite model streams about twice as fast: first audio in ~0.7 s instead of ~1.2 s.
 const TTS = "gemini-3.8-flash-lite-tts";
-const ttsRequest = (text: string) => ({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["AUDIO"] } });
+// Without a fixed voice, Gemini picks a different speaker per reply. Algenib is the gravelly one.
+const VOICE = "Algenib";
+const ttsRequest = (text: string) => ({
+  contents: [{ parts: [{ text }] }],
+  generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } } },
+});
 
 async function speak(text: string): Promise<Bytes> {
   const parts = await gemini(TTS, ttsRequest(text));

@@ -38,7 +38,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
   expect(tts[0]).toContain("gemini-3.8-flash-lite-tts:generateContent");
   expect(sent(tts)).toEqual({
     contents: [{ parts: [{ text: "Processed." }] }],
-    generationConfig: { responseModalities: ["AUDIO"] },
+    generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Algenib" } } } },
   });
 
   expect(res.headers.get("content-type")).toBe("audio/wav");
