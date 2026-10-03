@@ -37,6 +37,17 @@ export type AgentTraceEvent =
   | { type: "tool_end"; tool: string; isError: boolean }
   | { type: "assistant"; text: string };
 
+export function resolveGoogleModel(modelId: string) {
+  const registered = getModels("google").find((candidate) => candidate.id === modelId);
+  if (registered) return registered;
+  if (modelId === "gemini-3.8-flash") {
+    const flash = getModels("google").find((candidate) => candidate.id === "gemini-flash-latest");
+    if (!flash) throw new Error("Pi has no Google Flash model template");
+    return { ...flash, id: modelId, name: "Gemini 3.8 Flash" };
+  }
+  throw new Error(`unknown Google model: ${modelId}`);
+}
+
 export async function processCapture(options: {
   sandboxRoot: string;
   capturePath: string;
@@ -59,9 +70,8 @@ export async function processCapture(options: {
     appendSystemPrompt: [],
   });
   await loader.reload();
-  const modelId = options.model ?? "gemini-2.5-flash";
-  const model = getModels("google").find((candidate) => candidate.id === modelId);
-  if (!model) throw new Error(`unknown Google model: ${modelId}`);
+  const modelId = options.model ?? "gemini-3.8-flash";
+  const model = resolveGoogleModel(modelId);
 
   const { session } = await createAgentSession({
     cwd,

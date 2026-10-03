@@ -21,7 +21,7 @@ Or provide the capture directly:
 bun run harness -- capture "Ask Erik about deployment tomorrow. The Docker image may be causing startup latency."
 ```
 
-The CLI prints the agent's tool trajectory and the paths it creates. Persistent files live in `notes/cli/` by default. Use a different sandbox with `MEMORY_ROOT=/path/to/memory` and a different Google model with `PI_MODEL=<model-id>`.
+The CLI prints the agent's tool trajectory and the paths it creates. Persistent files live in `notes/cli/` by default. The agent defaults to `gemini-3.8-flash`. Use a different sandbox with `MEMORY_ROOT=/path/to/memory` and a different Google model with `PI_MODEL=<model-id>`.
 
 Run another capture to let the agent search and build on the same memory:
 
@@ -44,4 +44,3 @@ bun run harness -- shell list /memory
 ```
 
 The shell is for debugging. Normal captures always enter through the backend-only inbox writer; the agent receives no inbox-writing, shell, or raw filesystem tool.
-
