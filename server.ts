@@ -2,20 +2,25 @@ import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult } from "./
 import { poll } from "./telegram";
 import { z } from "zod";
 import { PasskeyAuth, type AuthUser } from "./auth";
+import { liveTranscript } from "./live";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
 // Blob and Response only take buffers over a plain ArrayBuffer, which is all we ever make.
 type Bytes = Buffer<ArrayBuffer>;
 
-async function gemini(model: string, body: object): Promise<any[]> {
-  const res = await fetch(`${API}/${model}:generateContent`, {
+async function post(model: string, method: string, body: object): Promise<Response> {
+  const res = await fetch(`${API}/${model}:${method}`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY ?? "" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${model} ${res.status}: ${await res.text()}`);
-  return (await res.json()).candidates?.[0]?.content?.parts ?? [];
+  return res;
+}
+
+async function gemini(model: string, body: object): Promise<any[]> {
+  return (await (await post(model, "generateContent", body)).json()).candidates?.[0]?.content?.parts ?? [];
 }
 
 async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string> {
@@ -26,13 +31,52 @@ async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string>
   return parts.find((p) => p.audioTranscription)?.audioTranscription.text ?? "";
 }
 
+// The lite model streams about twice as fast: first audio in ~0.7 s instead of ~1.2 s.
+const TTS = "gemini-3.8-flash-lite-tts";
+// Without a fixed voice, Gemini picks a different speaker per reply. Algenib is the gravelly one.
+const VOICE = "Algenib";
+const ttsRequest = (text: string) => ({
+  contents: [{ parts: [{ text }] }],
+  generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } } },
+});
+
 async function speak(text: string): Promise<Bytes> {
-  const parts = await gemini("gemini-3.8-flash-tts", {
-    contents: [{ parts: [{ text }] }],
-    generationConfig: { responseModalities: ["AUDIO"] },
-  });
+  const parts = await gemini(TTS, ttsRequest(text));
   // Already a complete WAV file, C2PA provenance chunk included.
   return Buffer.from(parts.find((p) => p.inlineData).inlineData.data, "base64");
+}
+
+// Streamed TTS is bare 24 kHz mono 16-bit PCM, sent as it's generated: the first audio arrives
+// in about 1 s instead of the whole reply in 3–4 s. Chunks are cut to whole samples.
+export async function* speakStream(text: string): AsyncGenerator<Bytes> {
+  const start = performance.now();
+  const res = await post(TTS, "streamGenerateContent?alt=sse", ttsRequest(text));
+  const decoder = new TextDecoder();
+  let events = "";
+  let halfSample: Bytes | undefined;
+  let bytes = 0;
+  for await (const chunk of res.body!) {
+    events = (events + decoder.decode(chunk, { stream: true })).replaceAll("\r\n", "\n");
+    for (let end = events.indexOf("\n\n"); end >= 0; end = events.indexOf("\n\n")) {
+      const data = events.slice(0, end).split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("");
+      events = events.slice(end + 2);
+      if (!data) continue;
+      const event = JSON.parse(data);
+      if (event.error) throw new Error(`${TTS} stream: ${JSON.stringify(event.error)}`);
+      for (const part of event.candidates?.[0]?.content?.parts ?? []) {
+        if (!part.inlineData) continue;
+        let pcm: Bytes = Buffer.from(part.inlineData.data, "base64");
+        if (halfSample) pcm = Buffer.concat([halfSample, pcm]);
+        const whole = pcm.length - (pcm.length % 2);
+        halfSample = whole < pcm.length ? pcm.subarray(whole) : undefined;
+        if (!whole) continue;
+        if (!bytes) console.log(`speak (stream): first audio after ${Math.round(performance.now() - start)} ms`);
+        bytes += whole;
+        yield pcm.subarray(0, whole);
+      }
+    }
+  }
+  console.log(`speak (stream): ${Math.round(performance.now() - start)} ms → ${kb({ byteLength: bytes })}`);
 }
 
 async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
@@ -105,20 +149,29 @@ export async function respond(
   transcript: string,
   options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
 ): Promise<string> {
+  const start = performance.now();
   const result = await timed(
     "harness",
-    (options.capture ?? captureMemory)({ sandboxRoot: options.sandboxRoot, transcript, source: options.source }),
+    (options.capture ?? captureMemory)({
+      sandboxRoot: options.sandboxRoot,
+      transcript,
+      source: options.source,
+      // Each tool call costs a model round trip, so these lines show where the harness spends its time.
+      onEvent: (event) => {
+        if (event.type === "tool_start") {
+          console.log(`harness: ${Math.round(performance.now() - start)} ms, ${event.tool} ${JSON.stringify(event.input).slice(0, 120)}`);
+        }
+      },
+    }),
     (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
   );
   return result.response.trim() || "Captured.";
 }
 
-// Audio in, spoken WAV reply out. Every voice channel goes through here.
-export async function converse(
-  audio: ArrayBuffer,
-  mimeType: string,
-  options: { sandboxRoot: string; source?: "voice" | "telegram"; capture?: CaptureWorkflow },
-): Promise<{ transcript: string; reply: Bytes }> {
+type VoiceOptions = { sandboxRoot: string; source?: "voice" | "telegram"; capture?: CaptureWorkflow };
+
+// Audio in, the transcript and the harness's answer out. Every voice channel goes through here.
+async function understand(audio: ArrayBuffer, mimeType: string, options: VoiceOptions): Promise<{ transcript: string; answer: string }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
   const answer = transcript
@@ -128,19 +181,58 @@ export async function converse(
         capture: options.capture,
       })
     : "I didn't catch that.";
-  const reply = await timed("speak", speak(answer), kb);
-  return { transcript, reply };
+  return { transcript, answer };
+}
+
+// The lite TTS model streams a reply faster than it returns it whole: 1.7–2.0 s against ~2.9 s.
+const speakWhole = async (text: string): Promise<Bytes> => Buffer.concat(await Array.fromAsync(speakStream(text)));
+
+// Audio in, the spoken reply out as raw PCM.
+export async function converse(audio: ArrayBuffer, mimeType: string, options: VoiceOptions): Promise<{ transcript: string; reply: Bytes }> {
+  const { transcript, answer } = await understand(audio, mimeType, options);
+  return { transcript, reply: await speakWhole(answer) };
+}
+
+// Waits for the first chunk, so a TTS failure still gets a clean 502 instead of a silent 200.
+async function streamed(audio: AsyncGenerator<Bytes>, headers: Record<string, string>): Promise<Response> {
+  const first = await audio.next();
+  const body = new ReadableStream<Bytes>({
+    start(controller) {
+      if (first.done) controller.close();
+      else controller.enqueue(first.value);
+    },
+    async pull(controller) {
+      try {
+        const next = await audio.next();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      } catch (err) {
+        console.error("speak (stream) failed mid-reply:", err);
+        controller.error(err);
+      }
+    },
+    async cancel() {
+      await audio.return(undefined);
+    },
+  });
+  return new Response(body, { headers: { ...headers, "content-type": "audio/l16; rate=24000; channels=1" } });
 }
 
 // WhatsApp and Telegram only show OGG/Opus as a voice note.
-export function toVoiceNote(wav: Bytes): Promise<Bytes> {
-  return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
+// Takes raw 24 kHz mono 16-bit PCM, which has no header, so ffmpeg is told the format.
+export function toVoiceNote(pcm: Bytes): Promise<Bytes> {
+  return timed(
+    "voice note",
+    run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "pipe:1"], pcm),
+    kb,
+  );
 }
 
 // A real reply takes seconds; this pause lets echo mode show the waiting indicators too.
 export const echoDelay = () => Bun.sleep(500 + Math.random() * 500);
 
-// Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
+// Accept: audio/l16 streams raw PCM as it's generated. Accept: audio/ogg gets a voice note, so a
+// WhatsApp or Telegram round trip can be tried with curl. Anything else gets WAV.
 export async function talk(req: Request, userId: string, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
@@ -151,16 +243,48 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
     return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   }
   try {
-    const { transcript, reply } = await converse(recording, mimeType, { sandboxRoot: userSandbox(userId), capture });
-    const voiceNote = req.headers.get("accept")?.includes("audio/ogg");
-    return new Response(voiceNote ? await toVoiceNote(reply) : reply, {
-      headers: { "content-type": voiceNote ? "audio/ogg" : "audio/wav", "x-transcript": encodeURIComponent(transcript) },
-    });
+    const accept = req.headers.get("accept") ?? "";
+    const { transcript, answer } = await understand(recording, mimeType, { sandboxRoot: userSandbox(userId), capture });
+    const headers = { "x-transcript": encodeURIComponent(transcript) };
+    if (accept.includes("audio/l16")) return await streamed(speakStream(answer), headers);
+    if (accept.includes("audio/ogg")) {
+      return new Response(await toVoiceNote(await speakWhole(answer)), { headers: { ...headers, "content-type": "audio/ogg" } });
+    }
+    return new Response(await timed("speak", speak(answer), kb), { headers: { ...headers, "content-type": "audio/wav" } });
   } catch (err) {
     console.error("talk failed:", err);
     return new Response(String(err), { status: 502 });
   }
 }
+
+type LiveTalk = { userId: string; live?: ReturnType<typeof liveTranscript> };
+
+// The page streams the recording in while the user talks. When it sends "end", the reply comes back on
+// the same socket: a JSON message with the transcript, then the spoken reply as raw PCM, then close.
+export const liveTalk: Bun.WebSocketHandler<LiveTalk> = {
+  open(ws) {
+    ws.data.live = liveTranscript();
+  },
+  async message(ws, message) {
+    if (typeof message !== "string") return ws.data.live!.feed(message);
+    try {
+      const transcript = await timed("transcribe (live)", ws.data.live!.finish(), JSON.stringify);
+      const answer = transcript
+        ? await respond(transcript, { sandboxRoot: userSandbox(ws.data.userId), source: "voice" })
+        : "I didn't catch that.";
+      ws.send(JSON.stringify({ transcript }));
+      for await (const chunk of speakStream(answer)) ws.send(chunk);
+      ws.close();
+    } catch (error) {
+      console.error("live talk failed:", error);
+      ws.send(JSON.stringify({ error: String(error) }));
+      ws.close(1011);
+    }
+  },
+  close(ws) {
+    ws.data.live?.close();
+  },
+};
 
 let authInstance: PasskeyAuth | undefined;
 function auth(): PasskeyAuth {
@@ -219,9 +343,16 @@ if (import.meta.main) {
         }),
       },
       "/api/talk": { POST: (request) => withUser(request, (user) => talk(request, user.id)) },
+      "/api/talk/live": (request, server) => {
+        const user = auth().user(request);
+        if (!user) return Response.json({ error: "authentication required" }, { status: 401 });
+        if (server.upgrade(request, { data: { userId: user.id } })) return;
+        return new Response("expected a WebSocket", { status: 400 });
+      },
       "/api/capture/text": { POST: (request) => withUser(request, (user) => captureText(request, user.id)) },
       "/api/query": { POST: (request) => withUser(request, (user) => queryMemory(request, user.id)) },
     },
+    websocket: liveTalk,
   });
   console.log(`listening on ${server.url}`);
   if (process.env.TELEGRAM_BOT_TOKEN) poll();

@@ -73,7 +73,8 @@ test("a voice note gets a voice note back, as a reply", async () => {
     getFile: () => ok({ file_path: "voice/file_1.oga" }),
     "/file/bot": () => new Response("OGG-IN"),
     "gemini-3.5-transcribe": () => Response.json({ candidates: [{ content: { parts: [{ audioTranscription: { text: "buy milk" } }] } }] }),
-    "gemini-3.8-flash-tts": () => Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: "V0FW" } }] } }] }),
+    "gemini-3.8-flash-lite-tts": () =>
+      new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: Buffer.from([1, 2, 3, 4]).toString("base64") } }] } }] })}\r\n\r\n`),
     sendVoice: () => ok({}),
   });
   const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OGG-OUT"));
@@ -93,7 +94,10 @@ test("a voice note gets a voice note back, as a reply", async () => {
     data: Buffer.from("OGG-IN").toString("base64"),
   });
   expect(capture).toHaveBeenCalledWith(expect.objectContaining({ transcript: "buy milk", source: "telegram" }));
-  expect((spawn.mock.calls[0][0] as string[])[0]).toBe("ffmpeg");
+  const [ffmpeg, { stdin }] = spawn.mock.calls[0] as [string[], { stdin: Blob }];
+  expect(ffmpeg[0]).toBe("ffmpeg");
+  expect(callTo(fetch, "gemini-3.8-flash-lite-tts")[0]).toContain(":streamGenerateContent?alt=sse");
+  expect([...new Uint8Array(await stdin.arrayBuffer())]).toEqual([1, 2, 3, 4]);
   const form = (callTo(fetch, "sendVoice")[1] as RequestInit).body as FormData;
   expect(form.get("chat_id")).toBe("42");
   expect(JSON.parse(form.get("reply_parameters") as string)).toEqual({ message_id: 3 });

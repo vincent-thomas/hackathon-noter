@@ -61,7 +61,7 @@ test("resolves and revokes an opaque HttpOnly session", async () => {
   expect(auth.user(request)).toBeNull();
 });
 
-test("rejects invalid email addresses before creating a challenge", async () => {
+test("rejects an email address without an @ before creating a challenge", async () => {
   const auth = await setup();
   await expect(auth.registrationOptions({ email: "not-an-email" })).rejects.toThrow();
   expect(auth.db.query("SELECT COUNT(*) AS count FROM challenges").get()).toEqual({ count: 0 });
@@ -98,4 +98,11 @@ test("stores morning briefing preference and timezone", async () => {
     hour: 8,
   });
   expect(() => auth.updateBriefingSettings(userId, { enabled: true, timezone: "not/a-zone" })).toThrow("invalid timezone");
+});
+
+test("accepts any email address with an @", async () => {
+  const auth = await setup();
+  for (const email of ["a@b", "ÅSA@exempel.se", "first.last+notes@sub.example.co.uk"]) {
+    await expect(auth.registrationOptions({ email })).resolves.toBeDefined();
+  }
 });

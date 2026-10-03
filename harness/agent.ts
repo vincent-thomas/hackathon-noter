@@ -52,6 +52,8 @@ export type MemoryQueryResult = {
   accessedPaths: string[];
 };
 
+const MODEL = "gemini-3.5-flash-lite";
+
 export function resolveGoogleModel(modelId: string) {
   const registered = getModels("google").find((candidate) => candidate.id === modelId);
   if (registered) return registered;
@@ -59,6 +61,11 @@ export function resolveGoogleModel(modelId: string) {
     const flash = getModels("google").find((candidate) => candidate.id === "gemini-flash-latest");
     if (!flash) throw new Error("Pi has no Google Flash model template");
     return { ...flash, id: modelId, name: "Gemini 3.8 Flash" };
+  }
+  if (modelId === "gemini-3.5-flash-lite") {
+    const lite = getModels("google").find((candidate) => candidate.id === "gemini-flash-lite-latest");
+    if (!lite) throw new Error("Pi has no Google Flash Lite model template");
+    return { ...lite, id: modelId, name: "Gemini 3.5 Flash Lite" };
   }
   throw new Error(`unknown Google model: ${modelId}`);
 }
@@ -84,8 +91,13 @@ ${memory}
 ${capture.content}
 </capture>
 
-Process it into useful durable memory.`;
+Process it into useful durable memory. If the capture only asks a question, answer it without calling any tool.`;
   return { prompt, inlined: inlined.map((file) => file.path) };
+}
+
+/** Whether every derived memory file is already in the prompt. Raw inbox captures don't count. */
+export function allInlined(existing: MemoryFile[], inlined: string[]): boolean {
+  return existing.every((file) => isInboxPath(file.path) || inlined.includes(file.path));
 }
 
 export async function processCapture(options: {
@@ -98,8 +110,11 @@ export async function processCapture(options: {
   const existing = (await harness.searchMemory({})).files;
   const before = new Set(existing.map((file) => file.path));
   const capture = await harness.readMemory({ path: options.capturePath });
-  const accessedPaths = new Set<string>([capture.path]);
-  const tools = createMemoryTools(harness);
+  const { prompt, inlined } = capturePrompt(capture, existing, new Date());
+  // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
+  const accessedPaths = new Set<string>([capture.path, ...inlined]);
+  // With all of memory in the prompt, reading, listing or searching only costs model round trips.
+  const tools = createMemoryTools(harness).filter((tool) => !allInlined(existing, inlined) || tool.name === "write_memory");
   const cwd = resolve(import.meta.dir, "..");
   const loader = new DefaultResourceLoader({
     cwd,
@@ -113,7 +128,7 @@ export async function processCapture(options: {
     appendSystemPrompt: [],
   });
   await loader.reload();
-  const modelId = options.model ?? "gemini-3.8-flash";
+  const modelId = options.model ?? MODEL;
   const model = resolveGoogleModel(modelId);
 
   const { session } = await createAgentSession({
@@ -137,9 +152,6 @@ export async function processCapture(options: {
   });
 
   try {
-    const { prompt, inlined } = capturePrompt(capture, existing, new Date());
-    // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
-    for (const path of inlined) accessedPaths.add(path);
     await session.prompt(prompt);
     const last = session.messages.at(-1);
     if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
@@ -183,7 +195,7 @@ export async function queryMemory(options: {
 
   const { session } = await createAgentSession({
     cwd,
-    model: resolveGoogleModel(options.model ?? "gemini-3.8-flash"),
+    model: resolveGoogleModel(options.model ?? MODEL),
     thinkingLevel: "low",
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(),

@@ -15,7 +15,8 @@ const SESSION_COOKIE = "noter_session";
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 const CHALLENGE_SECONDS = 5 * 60;
 
-const EmailInput = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict();
+// Deliberately loose: an address only needs an @. Strict format checks reject real addresses.
+const EmailInput = z.object({ email: z.string().trim().toLowerCase().includes("@").max(254) }).strict();
 const CeremonyInput = z.object({ ceremonyId: z.string().uuid(), response: z.record(z.string(), z.unknown()) }).strict();
 
 type ChallengeRow = {

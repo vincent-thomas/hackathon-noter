@@ -1,6 +1,6 @@
 # Noter
 
-Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), stores the raw capture, lets a Gemini 3.8 Flash agent organize useful persistent memory, and acknowledges the capture with Gemini TTS (`gemini-3.8-flash-tts`). Telegram voice notes use the same pipeline.
+Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), stores the raw capture, lets a Gemini 3.8 Flash agent organize useful persistent memory, and acknowledges the capture with Gemini TTS (`gemini-3.8-flash-lite-tts`). Telegram voice notes use the same pipeline.
 
 ## Run it
 
@@ -81,7 +81,13 @@ WhatsApp and Telegram send and play voice notes as OGG/Opus. Ask `/api/talk` for
 curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/ogg' localhost:3000/api/talk -o reply.ogg
 ```
 
-The web page asks for OGG too.
+Ask for `audio/l16` instead and the reply streams as raw 24 kHz mono 16-bit PCM while Gemini generates it. The first audio arrives about 1 s after the answer is ready, instead of 3–4 s for the whole file:
+
+```sh
+curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/l16' localhost:3000/api/talk -o reply.pcm
+```
+
+The web page asks for this stream and plays it as it arrives.
 
 ## Telegram
 
