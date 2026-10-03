@@ -1,8 +1,9 @@
-import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult, type Turn } from "./harness";
+import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult, type Turn } from "../harness";
 import { poll } from "./telegram";
 import { z } from "zod";
 import { PasskeyAuth, type AuthUser } from "./auth";
 import { liveTranscript } from "./live";
+import { resolve } from "node:path";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -88,7 +89,8 @@ async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
 
 type CaptureWorkflow = typeof captureMemory;
 type QueryWorkflow = typeof queryMemoryWorkflow;
-const userSandbox = (userId: string) => `${import.meta.dir}/notes/users/${userId}`;
+const projectRoot = resolve(import.meta.dir, "..");
+const userSandbox = (userId: string) => resolve(projectRoot, "notes", "users", userId);
 
 const TextCaptureRequest = z.object({ text: z.string().trim().min(1) }).strict();
 const QueryRequest = z.object({ question: z.string().trim().min(1) }).strict();
@@ -304,7 +306,7 @@ export const liveTalk: Bun.WebSocketHandler<LiveTalk> = {
 let authInstance: PasskeyAuth | undefined;
 function auth(): PasskeyAuth {
   return authInstance ??= new PasskeyAuth({
-    databasePath: `${import.meta.dir}/notes/accounts.sqlite`,
+    databasePath: resolve(projectRoot, "notes", "accounts.sqlite"),
     rpID: process.env.PASSKEY_RP_ID ?? "localhost",
     origin: process.env.PASSKEY_ORIGIN ?? "http://localhost:3000",
   });
@@ -332,11 +334,11 @@ if (import.meta.main) {
   const server = Bun.serve({
     port: 3000,
     routes: {
-      "/": Bun.file(new URL("index.html", import.meta.url)),
-      "/manifest.webmanifest": Bun.file(new URL("manifest.webmanifest", import.meta.url)),
-      "/icon-180.png": Bun.file(new URL("icon-180.png", import.meta.url)),
-      "/icon-512.png": Bun.file(new URL("icon-512.png", import.meta.url)),
-      "/auth-client.js": Bun.file(new URL("node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js", import.meta.url)),
+      "/": Bun.file(new URL("../index.html", import.meta.url)),
+      "/manifest.webmanifest": Bun.file(new URL("../manifest.webmanifest", import.meta.url)),
+      "/icon-180.png": Bun.file(new URL("../icon-180.png", import.meta.url)),
+      "/icon-512.png": Bun.file(new URL("../icon-512.png", import.meta.url)),
+      "/auth-client.js": Bun.file(new URL("../node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js", import.meta.url)),
       "/api/auth/options": { POST: async (request) => {
         try {
           return Response.json(await auth().options(await jsonBody(request)));

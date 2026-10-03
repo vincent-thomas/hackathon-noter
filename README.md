@@ -41,6 +41,16 @@ flowchart TD
 
 The Cloudflare Worker is the production application boundary. It serves the static PWA, verifies passkeys, scopes every protected request to a user, calls Gemini, runs the memory harness, accepts Telegram updates, and runs scheduled briefings. D1 stores structured control data; R2 stores the contents of each user's virtual Markdown filesystem.
 
+### Code layout
+
+```text
+local/       Bun development server, local passkeys, live audio, and Telegram polling
+cloudflare/  Production Worker, D1/R2 adapters, briefings, and Telegram webhook
+harness/     Shared Markdown memory model, typed tools, Pi agent, and programmatic CLI
+```
+
+Tests live beside the code they cover. Root-level files are project configuration and browser assets.
+
 ## Technology inventory
 
 | Technology | Role |
@@ -76,7 +86,7 @@ PASSKEY_RP_ID=noter.example.com
 PASSKEY_ORIGIN=https://noter.example.com
 ```
 
-The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
+The project folder is mounted into the container. Saving `local/server.ts` restarts the server, and `index.html` changes show up when you reload the page.
 
 ## Authenticated API
 
@@ -200,7 +210,7 @@ To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and res
 Needs [Bun](https://bun.sh). Voice-note conversion also needs `ffmpeg`:
 
 ```sh
-GEMINI_API_KEY=your-key bun --watch server.ts
+GEMINI_API_KEY=your-key bun --watch local/server.ts
 ```
 
 ## Deploy to Cloudflare Workers
@@ -286,7 +296,7 @@ Gemini is mocked in the tests, so no key is needed.
 
 ## Troubleshooting
 
-- **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `server.ts`. A `403` means the key is wrong.
+- **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `local/server.ts`. A `403` means the key is wrong.
 - **The page shows a Pi or Gemini error.** Check that `GEMINI_API_KEY` is available to both the transcription calls and the memory agent.
 - **Passkey creation or sign-in fails.** Open the app at exactly `PASSKEY_ORIGIN`. Outside localhost, HTTPS is required and `PASSKEY_RP_ID` must match the site's domain.
 - **The mic doesn't start.** Browsers only allow the microphone on `localhost` or HTTPS. Open the page at `localhost`, not at your LAN IP.

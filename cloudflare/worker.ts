@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { authOptions, currentUser, logout, verifyAuthentication, verifyRegistration } from "./cloudflare/auth";
-import { captureMemory, queryMemory } from "./cloudflare/agent";
-import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./cloudflare/briefing";
-import { configureTelegramWebhook, createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./cloudflare/telegram";
-import type { Env, User } from "./cloudflare/types";
+import { authOptions, currentUser, logout, verifyAuthentication, verifyRegistration } from "./auth";
+import { captureMemory, queryMemory } from "./agent";
+import { briefingSettings, runMorningBriefings, updateBriefingSettings } from "./briefing";
+import { configureTelegramWebhook, createTelegramLinkCode, handleTelegramWebhook, telegramSettings } from "./telegram";
+import type { Env, User } from "./types";
 
 const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).strict();
 const QueryInput = z.object({ question: z.string().trim().min(1).max(20_000) }).strict();

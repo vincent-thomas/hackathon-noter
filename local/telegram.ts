@@ -1,7 +1,8 @@
 // TEMPORARY: no access control. Anyone who finds the bot can use it; each chat has isolated memory.
 // Add an allowlist of Telegram user IDs before sharing the bot's username.
 import { converse, echoDelay, respond, toVoiceNote } from "./server";
-import type { captureMemory } from "./harness";
+import type { captureMemory } from "../harness";
+import { resolve } from "node:path";
 
 type TelegramDependencies = {
   capture?: typeof captureMemory;
@@ -97,7 +98,7 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
     });
     return;
   }
-  const sandboxRoot = `${import.meta.dir}/notes/users/${user.id}`;
+  const sandboxRoot = resolve(import.meta.dir, "..", "notes", "users", user.id);
 
   if (message.text) {
     await sendAfter(chat, "typing", async () => {

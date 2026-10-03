@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { captureText, queryMemory, respond, speakStream, talk } from "./server";
-import type { captureMemory, queryMemoryWorkflow } from "./harness";
+import type { captureMemory, queryMemoryWorkflow } from "../harness";
+import { resolve } from "node:path";
 
 const WAV = Buffer.from("RIFF....WAVE");
 const USER_ID = "test-user";
+const notes = (...parts: string[]) => resolve(import.meta.dir, "..", "notes", ...parts);
 const heard = (text: string) =>
   Response.json({ candidates: [{ content: { parts: [{ text: "" }, { audioTranscription: { text } }] } }] });
 const spoken = () =>
@@ -27,7 +29,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
   const res = await post(capture);
 
   expect(capture).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
+    sandboxRoot: notes("users", USER_ID),
     transcript: "hello there",
     source: "voice",
     history: [],
@@ -118,7 +120,7 @@ test("POST /api/capture/text runs the programmatic capture workflow", async () =
 
   expect(res.status).toBe(201);
   expect(capture).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
+    sandboxRoot: notes("users", USER_ID),
     transcript: "Ask Erik about deployment tomorrow",
     source: "text",
   });
@@ -142,7 +144,7 @@ test("POST /api/query returns an answer and separately tracked paths", async () 
 
   expect(res.status).toBe(200);
   expect(query).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
+    sandboxRoot: notes("users", USER_ID),
     question: "What should I discuss with Erik?",
   });
   expect(await res.json()).toEqual({
@@ -179,8 +181,8 @@ test("different account IDs resolve to different memory sandboxes", async () => 
   await captureText(request(), "user-b", capture);
 
   expect((capture as any).mock.calls.map(([input]: any[]) => input.sandboxRoot)).toEqual([
-    `${import.meta.dir}/notes/users/user-a`,
-    `${import.meta.dir}/notes/users/user-b`,
+    notes("users", "user-a"),
+    notes("users", "user-b"),
   ]);
 });
 
