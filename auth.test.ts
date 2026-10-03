@@ -61,7 +61,7 @@ test("resolves and revokes an opaque HttpOnly session", async () => {
   expect(auth.user(request)).toBeNull();
 });
 
-test("rejects invalid email addresses before creating a challenge", async () => {
+test("rejects an email address without an @ before creating a challenge", async () => {
   const auth = await setup();
   await expect(auth.registrationOptions({ email: "not-an-email" })).rejects.toThrow();
   expect(auth.db.query("SELECT COUNT(*) AS count FROM challenges").get()).toEqual({ count: 0 });
@@ -83,4 +83,11 @@ test("uses one email entry point to choose signup or login", async () => {
   const login = await auth.options({ email: "  VINCENT@example.com " });
   expect(login.mode).toBe("login");
   expect(login.options.allowCredentials).toEqual([{ id: "credential-id", transports: [], type: "public-key" }]);
+});
+
+test("accepts any email address with an @", async () => {
+  const auth = await setup();
+  for (const email of ["a@b", "ÅSA@exempel.se", "first.last+notes@sub.example.co.uk"]) {
+    await expect(auth.registrationOptions({ email })).resolves.toBeDefined();
+  }
 });
