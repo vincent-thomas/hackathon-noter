@@ -4,12 +4,12 @@
   "type": "module",
   "scripts": {
     "build:assets": "mkdir -p dist && cp index.html manifest.webmanifest icon-180.png icon-512.png dist/ && cp node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js dist/auth-client.js",
-    "dev": "node dev.mjs",
+    "dev": "wrangler d1 migrations apply noter-accounts --local && node dev.mjs",
     "cf:dev": "bun run build:assets && wrangler dev",
     "cf:types": "wrangler types",
     "cf:check": "tsc -p tsconfig.worker.json && bun run build:assets && wrangler deploy --dry-run",
     "cf:deploy": "wrangler d1 migrations apply noter-accounts --remote && bun run build:assets && wrangler deploy",
-    "cf:preview": "bun run build:assets && wrangler preview",
+    "cf:preview": "wrangler d1 migrations apply noter-accounts-preview --remote --config wrangler.preview-migrations.jsonc && bun run build:assets && wrangler preview",
     "test": "bun test"
   },
   "dependencies": {
