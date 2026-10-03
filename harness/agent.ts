@@ -20,7 +20,7 @@ The /inbox directory contains raw source captures written by the backend. You ma
 Existing memory files are immutable. write_memory can only create new files and fails if the path already exists.
 
 When processing a capture:
-- The raw capture's content and the list of existing memory files are in the prompt. Don't read or list them again; read individual files only when they look relevant.
+- The raw capture's content and existing memory are in the prompt: whole files while memory is small, otherwise just their paths. Don't read or list what you were given; read individual files only when you have just the path and they look relevant.
 - Treat the whole transcript as one interaction: retain useful new information and answer any questions it contains.
 - Determine which information has future value and is useful to retain.
 - Search existing memory when previous context may help interpret the capture or avoid duplication.
@@ -63,18 +63,29 @@ export function resolveGoogleModel(modelId: string) {
   throw new Error(`unknown Google model: ${modelId}`);
 }
 
+// Below this many characters, memory goes into the prompt whole, so questions need no read turns.
+export const INLINE_MEMORY_BUDGET = 20_000;
+
 /** Hands the agent what the backend already has, so it spends no model turns fetching it. */
-export function capturePrompt(capture: MemoryFile, existingPaths: string[], now: Date): string {
-  const existing = existingPaths.filter((path) => !isInboxPath(path));
-  return `A new capture was written to ${capture.path}. Its content is below.
+export function capturePrompt(capture: MemoryFile, existingFiles: MemoryFile[], now: Date): { prompt: string; inlined: string[] } {
+  const existing = existingFiles.filter((file) => !isInboxPath(file.path));
+  const size = existing.reduce((total, file) => total + file.content.length, 0);
+  const inlined = size <= INLINE_MEMORY_BUDGET ? existing : [];
+  const memory = !existing.length
+    ? "Existing memory: none yet"
+    : inlined.length
+      ? `Existing memory, in full:\n${inlined.map((file) => `<memory path="${file.path}" created_at="${file.frontmatter.created_at}">\n${file.content}\n</memory>`).join("\n")}`
+      : `Existing memory files: ${existing.map((file) => file.path).join(", ")}`;
+  const prompt = `A new capture was written to ${capture.path}. Its content is below.
 Current time: ${now.toISOString()}
-Existing memory files: ${existing.length ? existing.join(", ") : "none yet"}
+${memory}
 
 <capture>
 ${capture.content}
 </capture>
 
 Process it into useful durable memory.`;
+  return { prompt, inlined: inlined.map((file) => file.path) };
 }
 
 export async function processCapture(options: {
@@ -84,7 +95,8 @@ export async function processCapture(options: {
   onEvent?: (event: AgentTraceEvent) => void;
 }): Promise<{ createdPaths: string[]; accessedPaths: string[]; response: string }> {
   const harness = new MemoryHarness(options.sandboxRoot);
-  const before = new Set((await harness.searchMemory({})).files.map((file) => file.path));
+  const existing = (await harness.searchMemory({})).files;
+  const before = new Set(existing.map((file) => file.path));
   const capture = await harness.readMemory({ path: options.capturePath });
   const accessedPaths = new Set<string>([capture.path]);
   const tools = createMemoryTools(harness);
@@ -125,7 +137,10 @@ export async function processCapture(options: {
   });
 
   try {
-    await session.prompt(capturePrompt(capture, [...before], new Date()));
+    const { prompt, inlined } = capturePrompt(capture, existing, new Date());
+    // Which inlined files the answer drew on is unknowable, so all of them count as consulted.
+    for (const path of inlined) accessedPaths.add(path);
+    await session.prompt(prompt);
     const last = session.messages.at(-1);
     if (last?.role === "assistant" && last.errorMessage) throw new Error(last.errorMessage);
     const response = session.getLastAssistantText() ?? "";

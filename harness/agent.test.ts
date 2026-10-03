@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { capturePrompt, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
+import { capturePrompt, INLINE_MEMORY_BUDGET, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYSTEM_PROMPT, resolveGoogleModel, trackAccessedPaths } from "./agent";
 
 test("uses Gemini 3.8 Flash through Pi's Google Flash transport", () => {
   const model = resolveGoogleModel("gemini-3.8-flash");
@@ -36,17 +36,35 @@ test("capture agent supports memory and questions in the same transcript", () =>
   expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("Answer embedded questions directly");
 });
 
-test("the capture prompt carries the transcript and existing memory, so the agent needn't fetch them", () => {
-  const capture = {
-    path: "/inbox/2026-10-03--a.md",
-    frontmatter: { id: "a", created_at: "2026-10-03T12:00:00Z", source: "voice" as const },
-    content: "Ask Erik about the deployment.",
-  };
-  const prompt = capturePrompt(capture, ["/inbox/2026-10-03--a.md", "/inbox/older.md", "/tasks/erik.md", "/memory/docker.md"], new Date("2026-10-03T12:00:00Z"));
+const file = (path: string, content: string) => ({
+  path,
+  frontmatter: { id: path, created_at: "2026-10-02T09:00:00Z" },
+  content,
+});
 
-  expect(prompt).toContain("<capture>\nAsk Erik about the deployment.\n</capture>");
-  expect(prompt).toContain("Existing memory files: /tasks/erik.md, /memory/docker.md\n");
+test("the capture prompt carries the transcript and small memory whole, so the agent needn't fetch them", () => {
+  const capture = { ...file("/inbox/2026-10-03--a.md", "What do I ask Erik?"), frontmatter: { id: "a", created_at: "2026-10-03T12:00:00Z", source: "voice" as const } };
+  const { prompt, inlined } = capturePrompt(
+    capture,
+    [capture, file("/inbox/older.md", "raw"), file("/tasks/erik.md", "Ask Erik about the deployment.")],
+    new Date("2026-10-03T12:00:00Z"),
+  );
+
+  expect(prompt).toContain("<capture>\nWhat do I ask Erik?\n</capture>");
+  expect(prompt).toContain('<memory path="/tasks/erik.md" created_at="2026-10-02T09:00:00Z">\nAsk Erik about the deployment.\n</memory>');
+  expect(prompt).not.toContain("raw");
   expect(prompt).toContain("Current time: 2026-10-03T12:00:00.000Z");
-  expect(capturePrompt(capture, ["/inbox/older.md"], new Date())).toContain("Existing memory files: none yet");
-  expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("Don't read or list them again");
+  expect(inlined).toEqual(["/tasks/erik.md"]);
+  expect(capturePrompt(capture, [capture], new Date()).prompt).toContain("Existing memory: none yet");
+  expect(MEMORY_AGENT_SYSTEM_PROMPT).toContain("Don't read or list what you were given");
+});
+
+test("over the budget, the capture prompt lists memory paths only", () => {
+  const capture = file("/inbox/a.md", "hi");
+  const big = file("/memory/big.md", "x".repeat(INLINE_MEMORY_BUDGET));
+  const { prompt, inlined } = capturePrompt(capture, [big, file("/tasks/erik.md", "Ask Erik.")], new Date());
+
+  expect(prompt).toContain("Existing memory files: /memory/big.md, /tasks/erik.md\n");
+  expect(prompt).not.toContain("Ask Erik.");
+  expect(inlined).toEqual([]);
 });
