@@ -389,6 +389,25 @@
     }
   }
 
+  async function playRecording(blob) {
+    const response = await fetch("/api/talk", {
+      method: "POST",
+      headers: { "content-type": blob.type || "audio/webm" },
+      body: blob,
+    });
+    if (!response.ok) {
+      const message = await response.json().catch(() => ({}));
+      throw new Error(message.error || `Request failed (${response.status})`);
+    }
+    const transcript = decodeURIComponent(response.headers.get("x-transcript") || "");
+    const audio = await speaker.decodeAudioData(await response.arrayBuffer());
+    const source = speaker.createBufferSource();
+    source.buffer = audio;
+    source.connect(speaker.destination);
+    source.start();
+    status.textContent = transcript ? `You said: ${transcript}` : "Captured.";
+  }
+
   // Audio goes to the server while you talk, so the transcript is ready right after you stop.
   // At 16 kHz the worklet's samples are already in the format Gemini's live transcription wants.
   const captureWorklet = URL.createObjectURL(new Blob([`
@@ -414,15 +433,32 @@
       status.textContent = "Microphone access is needed to capture a thought.";
       return;
     }
-    const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/talk/live`);
-    socket.binaryType = "arraybuffer";
+    // The Bun server supports live transcription; the Cloudflare deployment currently uses
+    // its recorded-audio endpoint. Avoid a doomed WebSocket upgrade on workers.dev.
+    let liveFailed = location.hostname.endsWith(".workers.dev");
+    const socket = liveFailed ? null : new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/talk/live`);
+    if (socket) {
+      socket.binaryType = "arraybuffer";
+      socket.onerror = () => { liveFailed = true; };
+    }
+
+    // Workers currently use the regular audio endpoint. Keep a browser recording so a failed
+    // live upgrade can fall back without asking the user to repeat what they just said.
+    const chunks = [];
+    const recorder = new MediaRecorder(stream);
+    const recording = new Promise((resolve) => {
+      recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
+      recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+    });
+    recorder.start();
     // Speech captured before the socket opens is queued, so the first words aren't lost.
     const pending = [];
-    const send = (data) => (socket.readyState === WebSocket.OPEN ? socket.send(data) : pending.push(data));
-    socket.onopen = () => pending.splice(0).forEach((data) => socket.send(data));
+    const send = (data) => (socket?.readyState === WebSocket.OPEN ? socket.send(data) : pending.push(data));
+    if (socket) socket.onopen = () => pending.splice(0).forEach((data) => socket.send(data));
 
     const reply = new ReadableStream({
       start(controller) {
+        if (!socket) return;
         socket.onmessage = ({ data }) => {
           if (typeof data !== "string") return controller.enqueue(new Uint8Array(data));
           const message = JSON.parse(data);
@@ -431,8 +467,8 @@
           status.textContent = message.error ?? "You said: " + message.transcript;
         };
         socket.onclose = () => {
+          liveFailed = true;
           controller.close();
-          if (session) status.textContent = "Lost the connection. Tap to stop, then sign in again if this keeps happening.";
         };
       },
     });
@@ -449,16 +485,29 @@
     const fadeOut = showSpectrum(stream);
 
     session = {
-      stop() {
+      async stop() {
         session = null;
         fadeOut();
         microphone.close();
+        recorder.stop();
         stream.getTracks().forEach((t) => t.stop());
         mic.className = "thinking";
         mic.setAttribute("aria-label", "Processing recording");
         status.textContent = "Making sense of that…";
-        send("end");
-        playStream(reply);
+        try {
+          if (!liveFailed && socket?.readyState === WebSocket.OPEN) {
+            send("end");
+            await playStream(reply);
+          } else {
+            socket?.close();
+            await playRecording(await recording);
+          }
+        } catch (error) {
+          status.textContent = error.message || "Could not process that recording.";
+        } finally {
+          mic.className = "";
+          mic.setAttribute("aria-label", "Start recording");
+        }
       },
     };
     mic.className = "listening";
