@@ -12,3 +12,4 @@ services:
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:?put GEMINI_API_KEY in .env}
       ECHO: ${ECHO:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}

@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { poll } from "./telegram";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -89,4 +90,5 @@ if (import.meta.main) {
       "/api/talk": { POST: talk },
     },
   });
+  if (process.env.TELEGRAM_BOT_TOKEN) poll();
 }

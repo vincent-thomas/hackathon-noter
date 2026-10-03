@@ -35,6 +35,16 @@ curl --data-binary @note.ogg -H 'content-type: audio/ogg' -H 'accept: audio/ogg'
 
 The web page asks for OGG too.
 
+## Telegram
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`.
+2. Put the token it gives you into `.env` as `TELEGRAM_BOT_TOKEN=…`, then restart with `docker compose up`.
+3. Message your bot. For now it answers anything with "Send me a voice note."
+
+The bot asks Telegram for new messages itself, so it needs no public URL. Keep the token secret: whoever has it controls the bot. If it leaks, send `/revoke` to BotFather.
+
+**Temporary: there is no access control.** Anyone who finds the bot's username can use it, and everything they send lands in user 1's notes. Add an allowlist of Telegram user IDs before you share the username.
+
 ## Debugging
 
 To debug the page without spending Gemini tokens, add `ECHO=1` to `.env` and restart with `docker compose up`. The server then plays your recording back without calling Gemini.
