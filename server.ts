@@ -2,6 +2,7 @@ import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult } from "./
 import { poll } from "./telegram";
 import { z } from "zod";
 import { PasskeyAuth, type AuthUser } from "./auth";
+import { liveTranscript } from "./live";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -245,6 +246,35 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
   }
 }
 
+type LiveTalk = { userId: string; live?: ReturnType<typeof liveTranscript> };
+
+// The page streams the recording in while the user talks. When it sends "end", the reply comes back on
+// the same socket: a JSON message with the transcript, then the spoken reply as raw PCM, then close.
+export const liveTalk: Bun.WebSocketHandler<LiveTalk> = {
+  open(ws) {
+    ws.data.live = liveTranscript();
+  },
+  async message(ws, message) {
+    if (typeof message !== "string") return ws.data.live!.feed(message);
+    try {
+      const transcript = await timed("transcribe (live)", ws.data.live!.finish(), JSON.stringify);
+      const answer = transcript
+        ? await respond(transcript, { sandboxRoot: userSandbox(ws.data.userId), source: "voice" })
+        : "I didn't catch that.";
+      ws.send(JSON.stringify({ transcript }));
+      for await (const chunk of speakStream(answer)) ws.send(chunk);
+      ws.close();
+    } catch (error) {
+      console.error("live talk failed:", error);
+      ws.send(JSON.stringify({ error: String(error) }));
+      ws.close(1011);
+    }
+  },
+  close(ws) {
+    ws.data.live?.close();
+  },
+};
+
 let authInstance: PasskeyAuth | undefined;
 function auth(): PasskeyAuth {
   return authInstance ??= new PasskeyAuth({
@@ -295,9 +325,16 @@ if (import.meta.main) {
       } },
       "/api/auth/logout": { POST: (request) => Response.json({ ok: true }, { headers: { "set-cookie": auth().logout(request) } }) },
       "/api/talk": { POST: (request) => withUser(request, (user) => talk(request, user.id)) },
+      "/api/talk/live": (request, server) => {
+        const user = auth().user(request);
+        if (!user) return Response.json({ error: "authentication required" }, { status: 401 });
+        if (server.upgrade(request, { data: { userId: user.id } })) return;
+        return new Response("expected a WebSocket", { status: 400 });
+      },
       "/api/capture/text": { POST: (request) => withUser(request, (user) => captureText(request, user.id)) },
       "/api/query": { POST: (request) => withUser(request, (user) => queryMemory(request, user.id)) },
     },
+    websocket: liveTalk,
   });
   console.log(`listening on ${server.url}`);
   if (process.env.TELEGRAM_BOT_TOKEN) poll();
