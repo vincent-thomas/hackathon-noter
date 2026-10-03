@@ -64,16 +64,20 @@ async function handleMessage(env: Env, message: any) {
     return;
   }
 
-  let transcript: string | undefined;
-  if (typeof message.text === "string") transcript = message.text;
-  else if (message.voice?.file_id) transcript = await transcribeVoice(env, message.voice.file_id, message.voice.mime_type ?? "audio/ogg");
-  if (!transcript) {
-    await send(env, "sendMessage", { chat_id: chatId, text: "Send me a voice note or text message.", reply_parameters: reply });
-    return;
+  // "typing…" while we work. Telegram drops it after 5 s, so it's resent until the reply is out.
+  const typing = () => send(env, "sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+  await typing();
+  const timer = setInterval(typing, 4000);
+  let answer: string;
+  try {
+    let transcript: string | undefined;
+    if (typeof message.text === "string") transcript = message.text;
+    else if (message.voice?.file_id) transcript = await transcribeVoice(env, message.voice.file_id, message.voice.mime_type ?? "audio/ogg");
+    answer = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "Send me a voice note or text message.";
+  } finally {
+    clearInterval(timer);
   }
-
-  const result = await captureMemory(env, user.id, transcript, "telegram");
-  await send(env, "sendMessage", { chat_id: chatId, text: result.response || "Captured.", reply_parameters: reply });
+  await send(env, "sendMessage", { chat_id: chatId, text: answer, reply_parameters: reply });
 }
 
 async function consumeCode(env: Env, chatId: string, code: string): Promise<User | null> {
