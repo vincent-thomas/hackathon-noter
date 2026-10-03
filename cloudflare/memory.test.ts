@@ -39,9 +39,9 @@ test("the briefing harness synthesizes and persists one daily artifact", async (
     content: "# Ask Erik\n\nDiscuss deployment today.",
   });
   const gemini = spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
-    candidates: [{ content: { role: "model", parts: [{ text: "## Today\n\n- Discuss deployment with Erik." }] } }],
+    choices: [{ message: { role: "assistant", content: "## Today\n\n- Discuss deployment with Erik." } }],
   }));
-  const env = { MEMORY: bucket, GEMINI_API_KEY: "test", HARNESS_MODEL: "gemini-3.8-flash" } as any;
+  const env = { MEMORY: bucket, GEMINI_API_KEY: "test", CONDENSE_API_KEY: "condense", HARNESS_MODEL: "gemini-3.8-flash" } as any;
 
   const first = await generateMorningBriefing(env, "user-a", "2026-10-03", "Europe/Stockholm");
   const second = await generateMorningBriefing(env, "user-a", "2026-10-03", "Europe/Stockholm");
