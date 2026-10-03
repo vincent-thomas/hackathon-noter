@@ -81,3 +81,13 @@ test("all memory counts as inlined only when every derived file made it into the
   expect(allInlined(files, [])).toBe(false);
   expect(allInlined([file("/inbox/raw.md", "raw")], [])).toBe(true);
 });
+
+test("the capture prompt carries the recent conversation, oldest first, only when there is one", () => {
+  const capture = file("/inbox/a.md", "Actually, change that to 4 o'clock.");
+  const history = [{ said: "Dentist on Friday at 3.", answered: "Noted; your teeth vote for Friday." }];
+
+  expect(capturePrompt(capture, [], new Date(), history).prompt).toContain(
+    "Recent conversation, oldest first:\nUser: Dentist on Friday at 3.\nYou: Noted; your teeth vote for Friday.\n",
+  );
+  expect(capturePrompt(capture, [], new Date()).prompt).not.toContain("Recent conversation");
+});

@@ -1,4 +1,4 @@
-import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult } from "./harness";
+import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult, type Turn } from "./harness";
 import { poll } from "./telegram";
 import { z } from "zod";
 import { PasskeyAuth, type AuthUser } from "./auth";
@@ -144,11 +144,18 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
   return result;
 }
 
+// Recent exchanges per conversation, so "change that to 4 o'clock" and "say that again?" have context.
+// Keyed by notes folder and conversation id, so one user's id can never reach another user's history.
+const conversations = new Map<string, Turn[]>();
+const RECENT_TURNS = 6;
+
 // Transcript in, the harness's answer out. Every channel, voice or text, goes through here.
 export async function respond(
   transcript: string,
-  options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
+  options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow; conversation?: string },
 ): Promise<string> {
+  const key = options.conversation && `${options.sandboxRoot}:${options.conversation}`;
+  const history = (key && conversations.get(key)) || [];
   const start = performance.now();
   const result = await timed(
     "harness",
@@ -156,6 +163,7 @@ export async function respond(
       sandboxRoot: options.sandboxRoot,
       transcript,
       source: options.source,
+      history,
       // Each tool call costs a model round trip, so these lines show where the harness spends its time.
       onEvent: (event) => {
         if (event.type === "tool_start") {
@@ -165,10 +173,12 @@ export async function respond(
     }),
     (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
   );
-  return result.response.trim() || "Captured.";
+  const answer = result.response.trim() || "Captured.";
+  if (key) conversations.set(key, [...history, { said: transcript, answered: answer }].slice(-RECENT_TURNS));
+  return answer;
 }
 
-type VoiceOptions = { sandboxRoot: string; source?: "voice" | "telegram"; capture?: CaptureWorkflow };
+type VoiceOptions = { sandboxRoot: string; source?: "voice" | "telegram"; capture?: CaptureWorkflow; conversation?: string };
 
 // Audio in, the transcript and the harness's answer out. Every voice channel goes through here.
 async function understand(audio: ArrayBuffer, mimeType: string, options: VoiceOptions): Promise<{ transcript: string; answer: string }> {
@@ -179,6 +189,7 @@ async function understand(audio: ArrayBuffer, mimeType: string, options: VoiceOp
         sandboxRoot: options.sandboxRoot,
         source: options.source ?? "voice",
         capture: options.capture,
+        conversation: options.conversation,
       })
     : "I didn't catch that.";
   return { transcript, answer };
@@ -244,7 +255,11 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
   }
   try {
     const accept = req.headers.get("accept") ?? "";
-    const { transcript, answer } = await understand(recording, mimeType, { sandboxRoot: userSandbox(userId), capture });
+    const { transcript, answer } = await understand(recording, mimeType, {
+      sandboxRoot: userSandbox(userId),
+      capture,
+      conversation: req.headers.get("x-conversation") ?? undefined,
+    });
     const headers = { "x-transcript": encodeURIComponent(transcript) };
     if (accept.includes("audio/l16")) return await streamed(speakStream(answer), headers);
     if (accept.includes("audio/ogg")) {
@@ -257,7 +272,7 @@ export async function talk(req: Request, userId: string, capture: CaptureWorkflo
   }
 }
 
-type LiveTalk = { userId: string; live?: ReturnType<typeof liveTranscript> };
+type LiveTalk = { userId: string; conversation?: string; live?: ReturnType<typeof liveTranscript> };
 
 // The page streams the recording in while the user talks. When it sends "end", the reply comes back on
 // the same socket: a JSON message with the transcript, then the spoken reply as raw PCM, then close.
@@ -270,7 +285,7 @@ export const liveTalk: Bun.WebSocketHandler<LiveTalk> = {
     try {
       const transcript = await timed("transcribe (live)", ws.data.live!.finish(), JSON.stringify);
       const answer = transcript
-        ? await respond(transcript, { sandboxRoot: userSandbox(ws.data.userId), source: "voice" })
+        ? await respond(transcript, { sandboxRoot: userSandbox(ws.data.userId), source: "voice", conversation: ws.data.conversation })
         : "I didn't catch that.";
       ws.send(JSON.stringify({ transcript }));
       for await (const chunk of speakStream(answer)) ws.send(chunk);
@@ -349,7 +364,8 @@ if (import.meta.main) {
       "/api/talk/live": (request, server) => {
         const user = auth().user(request);
         if (!user) return Response.json({ error: "authentication required" }, { status: 401 });
-        if (server.upgrade(request, { data: { userId: user.id } })) return;
+        const conversation = new URL(request.url).searchParams.get("conversation") ?? undefined;
+        if (server.upgrade(request, { data: { userId: user.id, conversation } })) return;
         return new Response("expected a WebSocket", { status: 400 });
       },
       "/api/capture/text": { POST: (request) => withUser(request, (user) => captureText(request, user.id)) },

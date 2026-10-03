@@ -433,7 +433,7 @@
   async function playRecording(blob) {
     const response = await fetch("/api/talk", {
       method: "POST",
-      headers: { "content-type": blob.type || "audio/webm" },
+      headers: { "content-type": blob.type || "audio/webm", "x-conversation": conversation },
       body: blob,
     });
     if (!response.ok) {
@@ -458,6 +458,9 @@
         return true;
       }
     });`], { type: "text/javascript" }));
+
+  // One conversation per page load, so follow-ups like "say that again?" have context.
+  const conversation = crypto.randomUUID();
 
   // Hold to talk, let go to send. Pointer events cover mouse and touch alike.
   let session, held = false;
@@ -512,7 +515,7 @@
     // The Bun server supports live transcription; the Cloudflare deployment currently uses
     // its recorded-audio endpoint. Avoid a doomed WebSocket upgrade on workers.dev.
     let liveFailed = location.hostname.endsWith(".workers.dev");
-    const socket = liveFailed ? null : new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/talk/live`);
+    const socket = liveFailed ? null : new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/talk/live?conversation=${conversation}`);
     if (socket) {
       socket.binaryType = "arraybuffer";
       socket.onerror = () => { liveFailed = true; };

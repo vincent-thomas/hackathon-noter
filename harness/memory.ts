@@ -96,6 +96,11 @@ export class MemoryHarness {
     if (extname(resolved.virtualPath) !== ".md") {
       throw new Error(`memory path must end in .md: ${resolved.virtualPath}`);
     }
+    // With a conversation in view, the model re-files what it just recorded; an exact copy adds nothing.
+    const copy = (await this.searchMemory({})).files.find(
+      (file) => file.path !== resolved.virtualPath && !file.path.startsWith("/inbox/") && file.content.trim() === parsed.content.trim(),
+    );
+    if (copy) throw new Error(`already recorded in ${copy.path}`);
 
     let handle;
     try {

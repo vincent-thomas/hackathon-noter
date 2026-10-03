@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { captureText, queryMemory, speakStream, talk } from "./server";
+import { captureText, queryMemory, respond, speakStream, talk } from "./server";
 import type { captureMemory, queryMemoryWorkflow } from "./harness";
 
 const WAV = Buffer.from("RIFF....WAVE");
@@ -30,6 +30,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
     sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
     transcript: "hello there",
     source: "voice",
+    history: [],
     onEvent: expect.any(Function),
   });
 
@@ -231,4 +232,22 @@ test("a TTS failure before any audio still gets a 502", async () => {
 
   expect(res.status).toBe(502);
   expect(await res.text()).toContain("gemini-3.8-flash-lite-tts 429: quota");
+});
+
+test("respond gives a conversation its recent turns, and nobody else's", async () => {
+  const answers = ["Noted: dentist Friday at 3.", "Moved to 4."];
+  const capture = mock(async () => ({ capture: { path: "/inbox/c.md", id: "c" }, createdPaths: [], accessedPaths: [], response: answers.shift() ?? "" })) as unknown as typeof captureMemory;
+  const historyOf = (call: number) => (capture as any).mock.calls[call][0].history;
+
+  await respond("Dentist on Friday at 3.", { sandboxRoot: "/notes/a", source: "voice", capture, conversation: "tab-1" });
+  await respond("Change that to 4.", { sandboxRoot: "/notes/a", source: "voice", capture, conversation: "tab-1" });
+  await respond("Hello?", { sandboxRoot: "/notes/a", source: "voice", capture, conversation: "tab-2" });
+  await respond("Hello?", { sandboxRoot: "/notes/b", source: "voice", capture, conversation: "tab-1" });
+  await respond("Hello?", { sandboxRoot: "/notes/a", source: "voice", capture });
+
+  expect(historyOf(0)).toEqual([]);
+  expect(historyOf(1)).toEqual([{ said: "Dentist on Friday at 3.", answered: "Noted: dentist Friday at 3." }]);
+  expect(historyOf(2)).toEqual([]);
+  expect(historyOf(3)).toEqual([]);
+  expect(historyOf(4)).toEqual([]);
 });

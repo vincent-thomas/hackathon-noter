@@ -95,6 +95,16 @@ describe("MemoryHarness", () => {
     ]);
   });
 
+  test("rejects an exact copy of an existing memory", async () => {
+    const { harness } = await setup();
+    const frontmatter = { id: "one", created_at: CREATED_AT };
+    await harness.writeMemory({ path: "/tasks/dentist.md", content: "Dentist on Friday at 4.", frontmatter });
+    await expect(
+      harness.writeMemory({ path: "/tasks/dentist-repeat.md", content: " Dentist on Friday at 4.\n", frontmatter: { ...frontmatter, id: "two" } }),
+    ).rejects.toThrow("already recorded in /tasks/dentist.md");
+    expect((await harness.listMemory({ path: "/tasks" })).files).toEqual(["/tasks/dentist.md"]);
+  });
+
   test("rejects empty memories, which the model writes as placeholders", async () => {
     const { harness } = await setup();
     const input = { path: "/memory/dummy.md", frontmatter: { id: "dummy", created_at: CREATED_AT } };

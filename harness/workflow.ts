@@ -1,4 +1,4 @@
-import { processCapture, queryMemory, type AgentTraceEvent, type MemoryQueryResult } from "./agent";
+import { processCapture, queryMemory, type AgentTraceEvent, type MemoryQueryResult, type Turn } from "./agent";
 import { createInboxCapture } from "./inbox";
 
 export type CaptureMemoryResult = {
@@ -14,6 +14,7 @@ export async function captureMemory(options: {
   transcript: string;
   source?: "voice" | "telegram" | "text";
   model?: string;
+  history?: Turn[];
   onEvent?: (event: AgentTraceEvent) => void;
 }): Promise<CaptureMemoryResult> {
   const capture = await createInboxCapture(options.sandboxRoot, {
@@ -24,6 +25,7 @@ export async function captureMemory(options: {
     sandboxRoot: options.sandboxRoot,
     capturePath: capture.path,
     model: options.model,
+    history: options.history,
     onEvent: options.onEvent,
   });
   return { capture, ...processed };
