@@ -63,7 +63,7 @@ test("talk surfaces a sandbox failure", async () => {
   sandbox("", 125, "Cannot connect to the Docker daemon");
   const res = await post();
   expect(res.status).toBe(502);
-  expect(await res.text()).toContain("sandbox exited 125: Cannot connect to the Docker daemon");
+  expect(await res.text()).toContain("docker exited 125: Cannot connect to the Docker daemon");
 });
 
 test("talk surfaces a Gemini failure", async () => {

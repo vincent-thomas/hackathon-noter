@@ -32,19 +32,24 @@ async function speak(text: string): Promise<Buffer> {
 // Users don't exist yet; every request belongs to user 1.
 const USER_ID = 1;
 
+async function run(cmd: string[], input: string | Buffer): Promise<Buffer> {
+  const proc = Bun.spawn(cmd, { stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) throw new Error(`${cmd[0]} exited ${code}: ${err}`);
+  return Buffer.from(out);
+}
+
 // One throwaway container per request. The user's notes folder is its only writable path.
 // The proof-of-concept harness just files the transcript and reports the count.
 async function harness(transcript: string): Promise<string> {
   const notes = `${import.meta.dir}/notes/${USER_ID}`;
   await mkdir(notes, { recursive: true });
-  const proc = Bun.spawn([
+  const reply = await run([
     "docker", "run", "--rm", "-i", "--network", "none", "--cap-drop", "ALL", "--memory", "256m", "--read-only",
     "-v", `${notes}:/notes`, "alpine",
     "sh", "-c", 't=$(cat); echo "$t" >> /notes/notes.txt; echo "The sandbox heard: $t. It has $(wc -l < /notes/notes.txt) notes."',
-  ], { stdin: new Blob([transcript]), stdout: "pipe", stderr: "pipe" });
-  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-  if (code !== 0) throw new Error(`sandbox exited ${code}: ${err}`);
-  return out.trim();
+  ], transcript);
+  return reply.toString().trim();
 }
 
 // Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.

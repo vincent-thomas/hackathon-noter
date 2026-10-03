@@ -48,5 +48,5 @@ Gemini is mocked in the tests, so no key is needed.
 ## Troubleshooting
 
 - **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `server.ts`. A `403` means the key is wrong.
-- **The page shows `sandbox exited …`.** The text after it is Docker's own error. `Cannot connect to the Docker daemon` means the app can't reach the Docker socket; check that Docker is running.
+- **The page shows `docker exited …`.** The text after it is Docker's own error. `Cannot connect to the Docker daemon` means the app can't reach the Docker socket; check that Docker is running.
 - **The mic doesn't start.** Browsers only allow the microphone on `localhost` or HTTPS. Open the page at `localhost`, not at your LAN IP.
