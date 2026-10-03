@@ -76,9 +76,9 @@ The web page asks for OGG too.
 
 1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot`, and pick a name and a username ending in `bot`.
 2. Put the token it gives you into `.env` as `TELEGRAM_BOT_TOKEN=…`, then restart with `docker compose up`.
-3. Send your bot a voice note. It answers with a voice note, as a reply to yours. Anything else gets "Send me a voice note."
+3. Send your bot a voice note or a text message. It answers in kind, as a reply to yours: a voice note for a voice note, text for text. Anything else gets "Send me a voice note or a text message."
 
-With `ECHO=1` the bot sends your own voice note straight back, without calling Gemini. If something breaks, the chat only gets "Something broke, check the logs." and the details go to `docker compose logs`.
+With `ECHO=1` the bot sends your own voice note or text straight back after a short pause, without calling Gemini. If something breaks, the chat only gets "Something broke, check the logs." and the details go to `docker compose logs`.
 
 The bot asks Telegram for new messages itself, so it needs no public URL. Keep the token secret: whoever has it controls the bot. If it leaks, send `/revoke` to BotFather.
 

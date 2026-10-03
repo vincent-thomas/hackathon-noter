@@ -27,9 +27,9 @@ afterEach(() => {
   delete process.env.TELEGRAM_BOT_TOKEN;
 });
 
-test("pollOnce long-polls for messages and asks for a voice note", async () => {
+test("pollOnce long-polls for messages and asks for a voice note or text", async () => {
   const telegram = spyOn(globalThis, "fetch")
-    .mockResolvedValueOnce(ok([{ update_id: 7, message: { chat: { id: 42 }, text: "hi" } }]))
+    .mockResolvedValueOnce(ok([{ update_id: 7, message: { chat: { id: 42 }, photo: [] } }]))
     .mockResolvedValueOnce(ok({}));
 
   expect(await pollOnce(5)).toBe(8);
@@ -38,7 +38,7 @@ test("pollOnce long-polls for messages and asks for a voice note", async () => {
   expect(getUpdates.url).toBe("https://api.telegram.org/bot123:abc/getUpdates");
   expect(getUpdates.body).toEqual({ offset: 5, timeout: 50, allowed_updates: ["message"] });
   expect(sendMessage.url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
-  expect(sendMessage.body).toEqual({ chat_id: 42, text: "Send me a voice note." });
+  expect(sendMessage.body).toEqual({ chat_id: 42, text: "Send me a voice note or a text message." });
 });
 
 test("pollOnce keeps the offset when there is nothing new", async () => {
@@ -158,4 +158,38 @@ test("repeat runs a task on an interval until stopped, and reports failures", as
   expect(stopped).toBeGreaterThanOrEqual(2);
   expect(runs).toBe(stopped);
   expect(String(errors)).toBe("Error: boom");
+});
+
+const textUpdate = { update_id: 9, message: { message_id: 5, chat: { id: 42 }, text: "What do I need to ask Erik?" } };
+
+test("a text message goes to the harness and gets a text reply, while typing shows", async () => {
+  const fetch = routes({ getUpdates: () => ok([textUpdate]), sendChatAction: () => ok(true), sendMessage: () => ok({}) });
+  const capture = mock(async () => ({
+    capture: { path: "/inbox/capture.md", id: "capture" },
+    createdPaths: [],
+    accessedPaths: [],
+    response: "Ask him about the deployment.",
+  })) as typeof captureMemory;
+
+  expect(await pollOnce(0, { capture })).toBe(10);
+
+  expect(capture).toHaveBeenCalledWith(expect.objectContaining({ transcript: "What do I need to ask Erik?", source: "telegram" }));
+  expect(sent(callTo(fetch, "sendChatAction")).body).toEqual({ chat_id: 42, action: "typing" });
+  expect(sent(callTo(fetch, "sendMessage")).body).toEqual({
+    chat_id: 42,
+    text: "Ask him about the deployment.",
+    reply_parameters: { message_id: 5 },
+  });
+});
+
+test("ECHO=1 sends a text message back as is, without the harness", async () => {
+  process.env.ECHO = "1";
+  const fetch = routes({ getUpdates: () => ok([textUpdate]), sendChatAction: () => ok(true), sendMessage: () => ok({}) });
+  const capture = mock() as unknown as typeof captureMemory;
+  spyOn(Bun, "sleep").mockResolvedValue(undefined);
+
+  await pollOnce(0, { capture });
+
+  expect(capture).not.toHaveBeenCalled();
+  expect(sent(callTo(fetch, "sendMessage")).body.text).toBe("What do I need to ask Erik?");
 });

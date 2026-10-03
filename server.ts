@@ -102,7 +102,20 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
   return result;
 }
 
-// Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
+// Transcript in, the harness's answer out. Every channel, voice or text, goes through here.
+export async function respond(
+  transcript: string,
+  options: { source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
+): Promise<string> {
+  const result = await timed(
+    "harness",
+    (options.capture ?? captureMemory)({ sandboxRoot: userSandbox(), transcript, source: options.source }),
+    (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
+  );
+  return result.response.trim() || "Captured.";
+}
+
+// Audio in, spoken WAV reply out. Every voice channel goes through here.
 export async function converse(
   audio: ArrayBuffer,
   mimeType: string,
@@ -110,19 +123,9 @@ export async function converse(
 ): Promise<{ transcript: string; reply: Bytes }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
-  let answer = "I didn't catch that.";
-  if (transcript) {
-    const result = await timed(
-      "harness",
-      (options.capture ?? captureMemory)({
-        sandboxRoot: userSandbox(),
-        transcript,
-        source: options.source ?? "voice",
-      }),
-      (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
-    );
-    answer = result.response.trim() || "Captured.";
-  }
+  const answer = transcript
+    ? await respond(transcript, { source: options.source ?? "voice", capture: options.capture })
+    : "I didn't catch that.";
   const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };
 }
