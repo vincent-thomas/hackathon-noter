@@ -53,16 +53,27 @@ async function harness(transcript: string): Promise<string> {
   return reply.toString().trim();
 }
 
+const kb = (bytes: { byteLength: number }) => `${Math.round(bytes.byteLength / 1024)} KB`;
+
+async function timed<T>(step: string, work: Promise<T>, describe: (result: T) => string): Promise<T> {
+  const start = performance.now();
+  const result = await work;
+  console.log(`${step}: ${Math.round(performance.now() - start)} ms → ${describe(result)}`);
+  return result;
+}
+
 // Audio in, spoken WAV reply out. The web page, and later Telegram and WhatsApp, all go through here.
 export async function converse(audio: ArrayBuffer, mimeType: string): Promise<{ transcript: string; reply: Buffer }> {
-  const transcript = await transcribe(audio, mimeType);
-  const reply = await speak(transcript ? await harness(transcript) : "I didn't catch that.");
+  console.log(`converse: ${kb(audio)} of ${mimeType}`);
+  const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
+  const answer = transcript ? await timed("harness", harness(transcript), JSON.stringify) : "I didn't catch that.";
+  const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };
 }
 
 // WhatsApp and Telegram only show OGG/Opus as a voice note.
 export function toVoiceNote(wav: Buffer): Promise<Buffer> {
-  return run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav);
+  return timed("voice note", run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-ac", "1", "-f", "ogg", "pipe:1"], wav), kb);
 }
 
 // Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
@@ -70,7 +81,10 @@ export async function talk(req: Request): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
-  if (process.env.ECHO === "1") return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
+  if (process.env.ECHO === "1") {
+    console.log(`echo: ${kb(recording)} of ${mimeType}`);
+    return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
+  }
   try {
     const { transcript, reply } = await converse(recording, mimeType);
     const voiceNote = req.headers.get("accept")?.includes("audio/ogg");
@@ -78,17 +92,19 @@ export async function talk(req: Request): Promise<Response> {
       headers: { "content-type": voiceNote ? "audio/ogg" : "audio/wav", "x-transcript": encodeURIComponent(transcript) },
     });
   } catch (err) {
+    console.error("talk failed:", err);
     return new Response(String(err), { status: 502 });
   }
 }
 
 if (import.meta.main) {
-  Bun.serve({
+  const server = Bun.serve({
     port: 3000,
     routes: {
       "/": Bun.file(new URL("index.html", import.meta.url)),
       "/api/talk": { POST: talk },
     },
   });
+  console.log(`listening on ${server.url}`);
   if (process.env.TELEGRAM_BOT_TOKEN) poll();
 }

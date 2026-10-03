@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { talk } from "./server";
 
@@ -11,10 +11,9 @@ const post = () =>
   talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }));
 const sent = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
 
-afterEach(() => {
-  mock.restore();
-  delete process.env.ECHO;
-});
+// Bun loads .env into tests too, and ECHO=1 there would short-circuit every pipeline test.
+beforeEach(() => delete process.env.ECHO);
+afterEach(() => mock.restore());
 
 const proc = (stdout: string, code = 0, stderr = "") =>
   ({ stdout: new Response(stdout).body, stderr: new Response(stderr).body, exited: Promise.resolve(code) }) as any;

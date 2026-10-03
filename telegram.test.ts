@@ -41,7 +41,7 @@ test("a failed reply doesn't stop the batch", async () => {
 
   expect(await pollOnce(0)).toBe(9);
   expect(sent(telegram.mock.calls[2]).body.chat_id).toBe(2);
-  expect(String(error.mock.calls[0][0])).toContain("telegram sendMessage: Forbidden: bot was blocked by the user");
+  expect(error.mock.calls[0].join(" ")).toContain("reply to chat 1 failed: Error: telegram sendMessage: Forbidden: bot was blocked by the user");
 });
 
 test("a failed getUpdates throws, so poll can back off", async () => {
