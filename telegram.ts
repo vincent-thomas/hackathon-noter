@@ -32,6 +32,21 @@ async function download(fileId: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
+/** Runs `task` every `ms` until the returned function is called. Failures go to `onError`. */
+export function repeat(task: () => Promise<unknown>, ms: number, onError: (err: unknown) => void): () => void {
+  const timer = setInterval(() => task().catch(onError), ms);
+  return () => clearInterval(timer);
+}
+
+// Telegram drops a chat action after 5 s, so it's resent until the reply is out.
+// Only the first one is awaited: if that fails, the reply fails too.
+async function showRecording(chat: number): Promise<() => void> {
+  const show = () => call("sendChatAction", { chat_id: chat, action: "record_voice" });
+  await show();
+  console.log(`telegram: showing "recording voice" in chat ${chat}`);
+  return repeat(show, 4000, (err) => console.error(`telegram: chat action in chat ${chat} failed:`, err));
+}
+
 async function handle(message: any, dependencies: TelegramDependencies): Promise<void> {
   console.log(`telegram: ${describe(message)}`);
   const chat = message.chat.id;
@@ -47,7 +62,9 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
     console.log(`telegram: echoed the voice note back to chat ${chat}`);
     return;
   }
+  let stopRecording = () => {};
   try {
+    stopRecording = await showRecording(chat);
     const { reply } = await converse(await download(message.voice.file_id), message.voice.mime_type ?? "audio/ogg", {
       source: "telegram",
       capture: dependencies.capture,
@@ -56,10 +73,12 @@ async function handle(message: any, dependencies: TelegramDependencies): Promise
     form.append("chat_id", String(chat));
     form.append("reply_parameters", JSON.stringify(replyTo));
     form.append("voice", new Blob([await toVoiceNote(reply)], { type: "audio/ogg" }), "reply.ogg");
+    stopRecording();
     await call("sendVoice", form);
     console.log(`telegram: sent a voice note to chat ${chat}`);
   } catch (err) {
     // Details stay in the logs: without access control, a stranger could be reading the chat.
+    stopRecording();
     await call("sendMessage", { chat_id: chat, text: "Something broke, check the logs." });
     throw err;
   }
