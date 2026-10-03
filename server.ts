@@ -1,6 +1,7 @@
 import { captureMemory, queryMemoryWorkflow, type CaptureMemoryResult } from "./harness";
 import { poll } from "./telegram";
 import { z } from "zod";
+import { PasskeyAuth, type AuthUser } from "./auth";
 
 const API = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -34,9 +35,6 @@ async function speak(text: string): Promise<Bytes> {
   return Buffer.from(parts.find((p) => p.inlineData).inlineData.data, "base64");
 }
 
-// Users don't exist yet; every request belongs to user 1.
-const USER_ID = 1;
-
 async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
   const proc = Bun.spawn(cmd, { stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), new Response(proc.stderr).text(), proc.exited]);
@@ -46,7 +44,7 @@ async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
 
 type CaptureWorkflow = typeof captureMemory;
 type QueryWorkflow = typeof queryMemoryWorkflow;
-const userSandbox = () => `${import.meta.dir}/notes/${USER_ID}`;
+const userSandbox = (userId: string) => `${import.meta.dir}/notes/users/${userId}`;
 
 const TextCaptureRequest = z.object({ text: z.string().trim().min(1) }).strict();
 const QueryRequest = z.object({ question: z.string().trim().min(1) }).strict();
@@ -63,7 +61,7 @@ function jsonError(error: unknown, status: number): Response {
   return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status });
 }
 
-export async function captureText(request: Request, capture: CaptureWorkflow = captureMemory): Promise<Response> {
+export async function captureText(request: Request, userId: string, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   let input;
   try {
     input = TextCaptureRequest.parse(await jsonBody(request));
@@ -71,14 +69,14 @@ export async function captureText(request: Request, capture: CaptureWorkflow = c
     return jsonError(error, 400);
   }
   try {
-    return Response.json(await capture({ sandboxRoot: userSandbox(), transcript: input.text, source: "text" }), { status: 201 });
+    return Response.json(await capture({ sandboxRoot: userSandbox(userId), transcript: input.text, source: "text" }), { status: 201 });
   } catch (error) {
     console.error("text capture failed:", error);
     return jsonError(error, 502);
   }
 }
 
-export async function queryMemory(request: Request, query: QueryWorkflow = queryMemoryWorkflow): Promise<Response> {
+export async function queryMemory(request: Request, userId: string, query: QueryWorkflow = queryMemoryWorkflow): Promise<Response> {
   let input;
   try {
     input = QueryRequest.parse(await jsonBody(request));
@@ -86,7 +84,7 @@ export async function queryMemory(request: Request, query: QueryWorkflow = query
     return jsonError(error, 400);
   }
   try {
-    return Response.json(await query({ sandboxRoot: userSandbox(), question: input.question }));
+    return Response.json(await query({ sandboxRoot: userSandbox(userId), question: input.question }));
   } catch (error) {
     console.error("memory query failed:", error);
     return jsonError(error, 502);
@@ -105,11 +103,11 @@ async function timed<T>(step: string, work: Promise<T>, describe: (result: T) =>
 // Transcript in, the harness's answer out. Every channel, voice or text, goes through here.
 export async function respond(
   transcript: string,
-  options: { source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
+  options: { sandboxRoot: string; source: "voice" | "telegram" | "text"; capture?: CaptureWorkflow },
 ): Promise<string> {
   const result = await timed(
     "harness",
-    (options.capture ?? captureMemory)({ sandboxRoot: userSandbox(), transcript, source: options.source }),
+    (options.capture ?? captureMemory)({ sandboxRoot: options.sandboxRoot, transcript, source: options.source }),
     (capture: CaptureMemoryResult) => JSON.stringify(capture.createdPaths),
   );
   return result.response.trim() || "Captured.";
@@ -119,12 +117,16 @@ export async function respond(
 export async function converse(
   audio: ArrayBuffer,
   mimeType: string,
-  options: { source?: "voice" | "telegram"; capture?: CaptureWorkflow } = {},
+  options: { sandboxRoot: string; source?: "voice" | "telegram"; capture?: CaptureWorkflow },
 ): Promise<{ transcript: string; reply: Bytes }> {
   console.log(`converse: ${kb(audio)} of ${mimeType}`);
   const transcript = await timed("transcribe", transcribe(audio, mimeType), JSON.stringify);
   const answer = transcript
-    ? await respond(transcript, { source: options.source ?? "voice", capture: options.capture })
+    ? await respond(transcript, {
+        sandboxRoot: options.sandboxRoot,
+        source: options.source ?? "voice",
+        capture: options.capture,
+      })
     : "I didn't catch that.";
   const reply = await timed("speak", speak(answer), kb);
   return { transcript, reply };
@@ -139,7 +141,7 @@ export function toVoiceNote(wav: Bytes): Promise<Bytes> {
 export const echoDelay = () => Bun.sleep(500 + Math.random() * 500);
 
 // Accept: audio/ogg gets a voice note, so a WhatsApp or Telegram round trip can be tried with curl.
-export async function talk(req: Request, capture: CaptureWorkflow = captureMemory): Promise<Response> {
+export async function talk(req: Request, userId: string, capture: CaptureWorkflow = captureMemory): Promise<Response> {
   const recording = await req.arrayBuffer();
   const mimeType = req.headers.get("content-type")!.split(";")[0];
   // ECHO=1 skips Gemini, so debugging the page costs no tokens.
@@ -149,7 +151,7 @@ export async function talk(req: Request, capture: CaptureWorkflow = captureMemor
     return new Response(recording, { headers: { "content-type": mimeType, "x-transcript": "(echo)" } });
   }
   try {
-    const { transcript, reply } = await converse(recording, mimeType, { capture });
+    const { transcript, reply } = await converse(recording, mimeType, { sandboxRoot: userSandbox(userId), capture });
     const voiceNote = req.headers.get("accept")?.includes("audio/ogg");
     return new Response(voiceNote ? await toVoiceNote(reply) : reply, {
       headers: { "content-type": voiceNote ? "audio/ogg" : "audio/wav", "x-transcript": encodeURIComponent(transcript) },
@@ -160,14 +162,58 @@ export async function talk(req: Request, capture: CaptureWorkflow = captureMemor
   }
 }
 
+let authInstance: PasskeyAuth | undefined;
+function auth(): PasskeyAuth {
+  return authInstance ??= new PasskeyAuth({
+    databasePath: `${import.meta.dir}/notes/accounts.sqlite`,
+    rpID: process.env.PASSKEY_RP_ID ?? "localhost",
+    origin: process.env.PASSKEY_ORIGIN ?? "http://localhost:3000",
+  });
+}
+
+async function withUser(request: Request, handler: (user: AuthUser) => Promise<Response>): Promise<Response> {
+  const user = auth().user(request);
+  return user ? handler(user) : Response.json({ error: "authentication required" }, { status: 401 });
+}
+
+async function authEndpoint(request: Request, action: "register-options" | "register-verify" | "login-options" | "login-verify") {
+  try {
+    if (action === "register-options") return Response.json(await auth().registrationOptions(await jsonBody(request)));
+    if (action === "login-options") return Response.json(await auth().authenticationOptions());
+    const result = action === "register-verify"
+      ? await auth().verifyRegistration(await jsonBody(request))
+      : await auth().verifyAuthentication(await jsonBody(request));
+    return Response.json({ user: result.user }, { headers: { "set-cookie": result.cookie } });
+  } catch (error) {
+    return jsonError(error, 400);
+  }
+}
+
 if (import.meta.main) {
   const server = Bun.serve({
     port: 3000,
     routes: {
       "/": Bun.file(new URL("index.html", import.meta.url)),
-      "/api/talk": { POST: (request) => talk(request) },
-      "/api/capture/text": { POST: (request) => captureText(request) },
-      "/api/query": { POST: (request) => queryMemory(request) },
+      "/auth-client.js": Bun.file(new URL("node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js", import.meta.url)),
+      "/api/auth/options": { POST: async (request) => {
+        try {
+          return Response.json(await auth().options(await jsonBody(request)));
+        } catch (error) {
+          return jsonError(error, 400);
+        }
+      } },
+      "/api/auth/register/options": { POST: (request) => authEndpoint(request, "register-options") },
+      "/api/auth/register/verify": { POST: (request) => authEndpoint(request, "register-verify") },
+      "/api/auth/login/options": { POST: (request) => authEndpoint(request, "login-options") },
+      "/api/auth/login/verify": { POST: (request) => authEndpoint(request, "login-verify") },
+      "/api/auth/me": { GET: (request) => {
+        const user = auth().user(request);
+        return user ? Response.json({ user }) : Response.json({ error: "authentication required" }, { status: 401 });
+      } },
+      "/api/auth/logout": { POST: (request) => Response.json({ ok: true }, { headers: { "set-cookie": auth().logout(request) } }) },
+      "/api/talk": { POST: (request) => withUser(request, (user) => talk(request, user.id)) },
+      "/api/capture/text": { POST: (request) => withUser(request, (user) => captureText(request, user.id)) },
+      "/api/query": { POST: (request) => withUser(request, (user) => queryMemory(request, user.id)) },
     },
   });
   console.log(`listening on ${server.url}`);

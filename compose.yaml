@@ -10,5 +10,7 @@ services:
     ports: ["3000:3000"]
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:?put GEMINI_API_KEY in .env}
+      PASSKEY_RP_ID: ${PASSKEY_RP_ID:-localhost}
+      PASSKEY_ORIGIN: ${PASSKEY_ORIGIN:-http://localhost:3000}
       ECHO: ${ECHO:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}

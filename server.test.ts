@@ -3,6 +3,7 @@ import { captureText, queryMemory, talk } from "./server";
 import type { captureMemory, queryMemoryWorkflow } from "./harness";
 
 const WAV = Buffer.from("RIFF....WAVE");
+const USER_ID = "test-user";
 const heard = (text: string) =>
   Response.json({ candidates: [{ content: { parts: [{ text: "" }, { audioTranscription: { text } }] } }] });
 const spoken = () =>
@@ -10,7 +11,7 @@ const spoken = () =>
 const remembered = (createdPaths = ["/tasks/hello.md"]) =>
   mock(async () => ({ capture: { path: "/inbox/capture.md", id: "capture" }, createdPaths, accessedPaths: [], response: "Processed." })) as typeof captureMemory;
 const post = (capture = remembered()) =>
-  talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }), capture);
+  talk(new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/webm;codecs=opus" }, body: "abc" }), USER_ID, capture);
 const sent = (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string);
 
 // Bun loads .env into tests too, and ECHO=1 there would short-circuit every pipeline test.
@@ -26,7 +27,7 @@ test("talk transcribes, runs the unified memory interaction, and speaks its resp
   const res = await post(capture);
 
   expect(capture).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/1`,
+    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
     transcript: "hello there",
     source: "voice",
   });
@@ -50,6 +51,7 @@ test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () =
   const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("OggS..."));
   const res = await talk(
     new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/ogg", accept: "audio/ogg" }, body: "abc" }),
+    USER_ID,
     remembered(),
   );
 
@@ -107,12 +109,13 @@ test("POST /api/capture/text runs the programmatic capture workflow", async () =
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: "Ask Erik about deployment tomorrow" }),
     }),
+    USER_ID,
     capture,
   );
 
   expect(res.status).toBe(201);
   expect(capture).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/1`,
+    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
     transcript: "Ask Erik about deployment tomorrow",
     source: "text",
   });
@@ -130,12 +133,13 @@ test("POST /api/query returns an answer and separately tracked paths", async () 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question: "What should I discuss with Erik?" }),
     }),
+    USER_ID,
     query,
   );
 
   expect(res.status).toBe(200);
   expect(query).toHaveBeenCalledWith({
-    sandboxRoot: `${import.meta.dir}/notes/1`,
+    sandboxRoot: `${import.meta.dir}/notes/users/${USER_ID}`,
     question: "What should I discuss with Erik?",
   });
   expect(await res.json()).toEqual({
@@ -147,9 +151,10 @@ test("POST /api/query returns an answer and separately tracked paths", async () 
 test("programmatic endpoints reject invalid JSON input without invoking agents", async () => {
   const capture = remembered();
   const query = mock(async () => ({ answer: "", accessedPaths: [] })) as typeof queryMemoryWorkflow;
-  const captureRes = await captureText(new Request("http://x", { method: "POST", body: "{" }), capture);
+  const captureRes = await captureText(new Request("http://x", { method: "POST", body: "{" }), USER_ID, capture);
   const queryRes = await queryMemory(
     new Request("http://x", { method: "POST", body: JSON.stringify({ question: "" }) }),
+    USER_ID,
     query,
   );
 
@@ -157,4 +162,21 @@ test("programmatic endpoints reject invalid JSON input without invoking agents",
   expect(queryRes.status).toBe(400);
   expect(capture).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
+});
+
+test("different account IDs resolve to different memory sandboxes", async () => {
+  const capture = remembered();
+  const request = () => new Request("http://x", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "Remember this" }),
+  });
+
+  await captureText(request(), "user-a", capture);
+  await captureText(request(), "user-b", capture);
+
+  expect((capture as any).mock.calls.map(([input]: any[]) => input.sandboxRoot)).toEqual([
+    `${import.meta.dir}/notes/users/user-a`,
+    `${import.meta.dir}/notes/users/user-b`,
+  ]);
 });
