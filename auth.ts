@@ -36,7 +36,7 @@ type CredentialRow = {
   transports: string;
 };
 
-export type AuthUser = { id: string; name: string };
+export type AuthUser = { id: string; name: string; email: string | null };
 
 export class PasskeyAuth {
   readonly db: Database;
@@ -80,7 +80,16 @@ export class PasskeyAuth {
       );
     `);
     const columns = this.db.query("PRAGMA table_info(users)").all() as Array<{ name: string }>;
-    if (!columns.some((column) => column.name === "email")) this.db.run("ALTER TABLE users ADD COLUMN email TEXT");
+    const add = (name: string, definition: string) => {
+      if (!columns.some((column) => column.name === name)) this.db.run(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
+    };
+    add("email", "TEXT");
+    add("morning_briefing_enabled", "INTEGER NOT NULL DEFAULT 0");
+    add("morning_briefing_timezone", "TEXT NOT NULL DEFAULT 'UTC'");
+    add("morning_briefing_hour", "INTEGER NOT NULL DEFAULT 8");
+    add("morning_briefing_last_date", "TEXT");
+    add("morning_briefing_last_sent_at", "INTEGER");
+    add("morning_briefing_last_error", "TEXT");
     this.db.run("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email) WHERE email IS NOT NULL");
   }
 
@@ -138,7 +147,7 @@ export class PasskeyAuth {
           Date.now(),
         );
     })();
-    return { user: { id: challenge.user_id, name }, cookie: this.#session(challenge.user_id) };
+    return { user: { id: challenge.user_id, name, email }, cookie: this.#session(challenge.user_id) };
   }
 
   async authenticationOptions(input?: unknown) {
@@ -181,7 +190,7 @@ export class PasskeyAuth {
     if (!verification.verified) throw new Error("passkey authentication failed");
     this.db.query("UPDATE credentials SET counter = ? WHERE id = ?")
       .run(verification.authenticationInfo.newCounter, credential.id);
-    const user = this.db.query("SELECT id, name FROM users WHERE id = ?").get(credential.user_id) as AuthUser | null;
+    const user = this.db.query("SELECT id, name, email FROM users WHERE id = ?").get(credential.user_id) as AuthUser | null;
     if (!user) throw new Error("account not found");
     return { user, cookie: this.#session(user.id) };
   }
@@ -189,7 +198,7 @@ export class PasskeyAuth {
   user(request: Request): AuthUser | null {
     const token = parseCookies(request.headers.get("cookie"))[SESSION_COOKIE];
     if (!token) return null;
-    const user = this.db.query(`SELECT users.id, users.name FROM sessions
+    const user = this.db.query(`SELECT users.id, users.name, users.email FROM sessions
       JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`)
       .get(hash(token), Date.now()) as AuthUser | null;
@@ -200,6 +209,27 @@ export class PasskeyAuth {
     const token = parseCookies(request.headers.get("cookie"))[SESSION_COOKIE];
     if (token) this.db.query("DELETE FROM sessions WHERE token_hash = ?").run(hash(token));
     return cookie("", 0, this.origin.startsWith("https://"));
+  }
+
+  briefingSettings(userId: string) {
+    const row = this.db.query(`SELECT morning_briefing_enabled, morning_briefing_timezone,
+      morning_briefing_hour, morning_briefing_last_sent_at FROM users WHERE id = ?`).get(userId) as any;
+    if (!row) throw new Error("account not found");
+    return {
+      enabled: Boolean(row.morning_briefing_enabled),
+      timezone: row.morning_briefing_timezone,
+      hour: row.morning_briefing_hour,
+      lastSentAt: row.morning_briefing_last_sent_at ? new Date(row.morning_briefing_last_sent_at).toISOString() : null,
+    };
+  }
+
+  updateBriefingSettings(userId: string, input: unknown) {
+    const parsed = z.object({ enabled: z.boolean(), timezone: z.string().trim().min(1).max(100) }).strict().parse(input);
+    try { new Intl.DateTimeFormat("en", { timeZone: parsed.timezone }).format(); }
+    catch { throw new Error("invalid timezone"); }
+    this.db.query("UPDATE users SET morning_briefing_enabled = ?, morning_briefing_timezone = ? WHERE id = ?")
+      .run(parsed.enabled ? 1 : 0, parsed.timezone, userId);
+    return this.briefingSettings(userId);
   }
 
   #challenge(type: ChallengeRow["type"], challenge: string, userId?: string, name?: string): string {

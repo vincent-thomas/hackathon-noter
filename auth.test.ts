@@ -55,7 +55,7 @@ test("resolves and revokes an opaque HttpOnly session", async () => {
     .run(tokenHash, userId, Date.now() + 60_000);
   const request = new Request("http://localhost", { headers: { cookie: `noter_session=${token}` } });
 
-  expect(auth.user(request)).toEqual({ id: userId, name: "Vincent" });
+  expect(auth.user(request)).toEqual({ id: userId, name: "Vincent", email: null });
   expect(auth.logout(request)).toContain("HttpOnly");
   expect(auth.logout(request)).toContain("Max-Age=0");
   expect(auth.user(request)).toBeNull();
@@ -83,6 +83,21 @@ test("uses one email entry point to choose signup or login", async () => {
   const login = await auth.options({ email: "  VINCENT@example.com " });
   expect(login.mode).toBe("login");
   expect(login.options.allowCredentials).toEqual([{ id: "credential-id", transports: [], type: "public-key" }]);
+});
+
+test("stores morning briefing preference and timezone", async () => {
+  const auth = await setup();
+  const userId = crypto.randomUUID();
+  auth.db.query("INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)")
+    .run(userId, "vincent", "vincent@example.com", Date.now());
+
+  expect(auth.briefingSettings(userId)).toMatchObject({ enabled: false, timezone: "UTC", hour: 8 });
+  expect(auth.updateBriefingSettings(userId, { enabled: true, timezone: "Europe/Stockholm" })).toMatchObject({
+    enabled: true,
+    timezone: "Europe/Stockholm",
+    hour: 8,
+  });
+  expect(() => auth.updateBriefingSettings(userId, { enabled: true, timezone: "not/a-zone" })).toThrow("invalid timezone");
 });
 
 test("accepts any email address with an @", async () => {

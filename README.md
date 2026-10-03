@@ -13,7 +13,7 @@ docker compose up
 
 Open http://localhost:3000. Tap the mic, talk, tap again. A single recording can contain information to remember, questions about existing memory, or both. The agent stores useful new information and speaks its answer; a capture without a question receives a short acknowledgement.
 
-The first visit asks for a display name and creates a passkey. Returning users sign in with that passkey—there are no passwords. Passkeys work on `localhost`; deployed environments must use HTTPS and configure:
+The sign-in screen always asks for an email and a passkey. A new email silently creates an account; an existing email signs in—there are no passwords. Passkeys work on `localhost`; deployed environments must use HTTPS and configure:
 
 ```sh
 PASSKEY_RP_ID=noter.example.com
@@ -112,6 +112,49 @@ Needs [Bun](https://bun.sh). Voice-note conversion also needs `ffmpeg`:
 ```sh
 GEMINI_API_KEY=your-key bun --watch server.ts
 ```
+
+## Deploy to Cloudflare Workers
+
+The Worker deployment uses Cloudflare-native persistence: D1 stores accounts, passkeys, challenges, and sessions; R2 stores each account's immutable Markdown memory; Workers Static Assets serves the browser UI. The passkey RP ID and origin are derived from the deployed request URL, so both `workers.dev` and custom HTTPS domains work without rebuilding.
+
+The production Worker is currently available at https://noter.7p80u8m6.workers.dev.
+
+Authenticate Wrangler and create the two persistent resources once:
+
+```sh
+bunx wrangler login
+bunx wrangler d1 create noter-accounts
+bunx wrangler r2 bucket create noter-memory
+```
+
+When deploying into another Cloudflare account, replace `database_id` in `wrangler.jsonc` with the ID returned by `d1 create`. Then configure the secret, migrate, and deploy:
+
+```sh
+bunx wrangler secret put GEMINI_API_KEY
+bunx wrangler d1 migrations apply noter-accounts --remote
+bun run cf:deploy
+```
+
+For local `workerd` development, keep `GEMINI_API_KEY` in `.env` and run:
+
+```sh
+bunx wrangler d1 migrations apply noter-accounts --local
+bun run cf:dev
+```
+
+The Worker serves browser speech as WAV directly because Workers cannot spawn `ffmpeg`. The Bun server remains the Telegram/OGG runtime.
+
+### Morning briefings
+
+Users can enable a daily email briefing from Settings. The browser saves their IANA timezone, an hourly Cron Trigger selects accounts whose local time is 08:00, and the memory harness synthesizes an immutable `/briefings/YYYY-MM-DD.md` before Resend delivers it. Daily database claims plus Resend idempotency keys prevent duplicates.
+
+Add the Resend secret before deploying:
+
+```sh
+bunx wrangler secret put RESEND_API_KEY
+```
+
+The default sender is `Noter <onboarding@resend.dev>`, which is suitable for Resend testing. After verifying a sending domain, change `RESEND_FROM` in `wrangler.jsonc` to an address on that domain.
 
 ## Test
 
