@@ -5,83 +5,96 @@ import { allInlined, capturePrompt, MEMORY_AGENT_SYSTEM_PROMPT, MEMORY_QUERY_SYS
 const BRIEFING_SYSTEM = `Create a concise morning briefing from the user's external memory. Prioritize commitments, time-sensitive plans, open questions, and context useful today. Synthesize rather than dumping notes. Preserve uncertainty and contradictions. Do not invent dates or facts. Do not include source paths, citations, greetings, or a Sources section. Use short Markdown sections and bullets that scan well in email. If nothing is relevant, say so plainly.`;
 
 const declarations = [
-  { name: "read_memory", description: "Read one Markdown memory file by virtual path.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
-  { name: "list_memory", description: "List Markdown files below a virtual directory.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
-  { name: "search_memory", description: "Search by path scope, case-insensitive content, and exact frontmatter.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" }, contains: { type: "STRING" }, frontmatter: { type: "OBJECT" } } } },
-  { name: "write_memory", description: "Create a derived Markdown memory. Never writes inbox or overwrites.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" }, content: { type: "STRING" } }, required: ["path", "content"] } },
+  { name: "read_memory", description: "Read one Markdown memory file by virtual path.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+  { name: "list_memory", description: "List Markdown files below a virtual directory.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+  { name: "search_memory", description: "Search by path scope, case-insensitive content, and exact frontmatter.", parameters: { type: "object", properties: { path: { type: "string" }, contains: { type: "string" }, frontmatter: { type: "object" } } } },
+  { name: "write_memory", description: "Create a derived Markdown memory. Never writes inbox or overwrites.", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
 ];
 
-type Part = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; functionResponse?: unknown };
-type Content = { role: "user" | "model"; parts: Part[] };
+type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+type Message = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+};
 
-async function generate(env: Env, body: object): Promise<{ content: Content; parts: Part[] }> {
+async function generate(env: Env, messages: Message[], tools: typeof declarations): Promise<Message> {
   const model = env.HARNESS_MODEL || "gemini-3.5-flash-lite";
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  if (!env.CONDENSE_API_KEY) throw new Error("CONDENSE_API_KEY is required");
+  const response = await fetch("https://api.condense.chat/openai/v1/chat/completions", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${env.GEMINI_API_KEY}`,
+      "x-condense-auth-token": env.CONDENSE_API_KEY,
+      "x-condense-upstream-url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      tools: tools.map((tool) => ({ type: "function", function: tool })),
+      tool_choice: "auto",
+      temperature: 0.2,
+    }),
   });
-  if (!response.ok) throw new Error(`${model} ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`Condense/${model} ${response.status}: ${await response.text()}`);
   const json = await response.json<any>();
-  const content = json.candidates?.[0]?.content as Content | undefined;
-  if (!content?.parts) throw new Error("Gemini returned no response");
-  return { content, parts: content.parts };
+  const message = json.choices?.[0]?.message as Message | undefined;
+  if (!message) throw new Error("Condense returned no completion");
+  return message;
 }
 
 const READ_ONLY = ["read_memory", "list_memory", "search_memory"];
 
 async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: string, allowed: string[]) {
   const start = performance.now();
-  const contents: Content[] = [{ role: "user", parts: [{ text: prompt }] }];
+  const messages: Message[] = [{ role: "system", content: system }, { role: "user", content: prompt }];
   const accessed = new Set<string>();
   const created: string[] = [];
   const tools = declarations.filter((tool) => allowed.includes(tool.name));
 
   for (let turn = 0; turn < 12; turn++) {
-    const result = await generate(env, {
-      systemInstruction: { parts: [{ text: system }] },
-      contents,
-      tools: [{ functionDeclarations: tools }],
-      generationConfig: { temperature: 0.2 },
-    });
-    contents.push(result.content);
-    const calls = result.parts.flatMap((part) => part.functionCall ? [part.functionCall] : []);
+    const result = await generate(env, messages, tools);
+    messages.push(result);
+    const calls = result.tool_calls ?? [];
     if (!calls.length) return {
-      text: result.parts.map((part) => part.text ?? "").join("").trim(),
+      text: result.content?.trim() ?? "",
       accessedPaths: [...accessed].sort(),
       createdPaths: created,
     };
 
-    const responses: Part[] = [];
     for (const call of calls) {
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(call.function.arguments || "{}"); }
+      catch { args = {}; }
       // Each tool call costs a model round trip, so these lines show where the agent spends its time.
-      console.log(`harness: ${Math.round(performance.now() - start)} ms, ${call.name} ${JSON.stringify(call.args ?? {}).slice(0, 120)}`);
+      console.log(`harness: ${Math.round(performance.now() - start)} ms, ${call.function.name} ${JSON.stringify(args).slice(0, 120)}`);
       let output: unknown;
       try {
-        if (call.name === "read_memory") {
-          output = await memory.read(String(call.args?.path));
+        if (call.function.name === "read_memory") {
+          output = await memory.read(String(args.path));
           accessed.add((output as { path: string }).path);
-        } else if (call.name === "list_memory") {
-          output = await memory.list(String(call.args?.path));
+        } else if (call.function.name === "list_memory") {
+          output = await memory.list(String(args.path));
           for (const path of (output as { files: string[] }).files) accessed.add(path);
-        } else if (call.name === "search_memory") {
-          output = await memory.search(call.args ?? {});
+        } else if (call.function.name === "search_memory") {
+          output = await memory.search(args);
           for (const file of (output as { files: Array<{ path: string }> }).files) accessed.add(file.path);
-        } else if (call.name === "write_memory" && allowed.includes("write_memory")) {
+        } else if (call.function.name === "write_memory" && allowed.includes("write_memory")) {
           // The id and timestamp are bookkeeping, so they're filled in here; the model misplaced them.
           output = await memory.write({
-            path: String(call.args?.path ?? ""),
-            content: String(call.args?.content ?? ""),
+            path: String(args.path ?? ""),
+            content: String(args.content ?? ""),
             frontmatter: { id: crypto.randomUUID(), created_at: new Date().toISOString() },
           });
           created.push((output as { path: string }).path);
-        } else throw new Error(`unknown tool: ${call.name}`);
+        } else throw new Error(`unknown tool: ${call.function.name}`);
       } catch (error) {
         output = { error: error instanceof Error ? error.message : String(error) };
       }
-      responses.push({ functionResponse: { name: call.name, response: { output } } });
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ output }) });
     }
-    contents.push({ role: "user", parts: responses });
   }
   throw new Error("memory agent exceeded its tool-call limit");
 }

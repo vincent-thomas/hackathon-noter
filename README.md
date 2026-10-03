@@ -50,6 +50,7 @@ The Cloudflare Worker is the production application boundary. It serves the stat
 | Cloudflare D1 | Users, passkey credentials, challenges, sessions, settings, briefing delivery state, and Telegram links |
 | Cloudflare R2 | Persistent per-user Markdown memory |
 | Gemini API | Voice transcription, agent reasoning, query answers, briefings, and browser speech synthesis |
+| Condense | OpenAI-compatible proxy that compacts memory-agent conversations before forwarding them to Gemini |
 | WebAuthn via SimpleWebAuthn | Passwordless passkey registration and authentication |
 | Zod | Request, tool-input, and Markdown-frontmatter validation |
 | Resend | Delivery of morning briefing email |
@@ -60,10 +61,10 @@ The Cloudflare Worker is the production application boundary. It serves the stat
 
 ## Run it
 
-You need a Gemini API key. Get one at https://aistudio.google.com/apikey.
+You need Gemini and Condense API keys. Get the Gemini key at https://aistudio.google.com/apikey. The Condense account must have its proxy and custom-upstream capability enabled.
 
 ```sh
-echo GEMINI_API_KEY=your-key > .dev.vars
+printf 'GEMINI_API_KEY=%s\nCONDENSE_API_KEY=%s\n' 'your-gemini-key' 'your-condense-key' > .dev.vars
 bunx wrangler d1 migrations apply noter-accounts --local
 bun run dev
 ```
@@ -184,6 +185,7 @@ When deploying into another Cloudflare account, replace `database_id` in `wrangl
 
 ```sh
 bunx wrangler secret put GEMINI_API_KEY
+bunx wrangler secret put CONDENSE_API_KEY
 bunx wrangler d1 migrations apply noter-accounts --remote
 bun run cf:deploy
 ```
@@ -245,6 +247,6 @@ Gemini is mocked in the tests, so no key is needed.
 ## Troubleshooting
 
 - **The page shows a `502` with a Gemini error.** The message names the model that failed and includes Google's own error text. A `400` from `gemini-3.5-transcribe` usually means it rejected the audio format (Chrome records WebM). A `404` means your key can't reach that model ID; change it in `gemini.ts`. A `403` means the key is wrong.
-- **The page shows a Gemini error.** Check that `GEMINI_API_KEY` is set: in `.dev.vars` locally, as a Worker secret in production.
+- **The page shows a Condense or Gemini error.** Check that `GEMINI_API_KEY` and `CONDENSE_API_KEY` are set in `.dev.vars` locally and as Worker secrets in production. The Condense account also needs custom-upstream access so the proxy can forward to Gemini's OpenAI-compatible API.
 - **Passkey creation or sign-in fails.** Outside localhost, HTTPS is required, and a passkey only works on the domain it was created on.
 - **The mic doesn't start.** Browsers only allow the microphone on `localhost` or HTTPS. Open the page at `localhost`, not at your LAN IP.

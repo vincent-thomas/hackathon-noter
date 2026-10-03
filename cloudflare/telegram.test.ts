@@ -48,8 +48,8 @@ function linkedChat(harnessAnswer: string, harnessStatus = 200) {
     ["/getFile", () => Response.json({ ok: true, result: { file_path: "voice/1.oga" } })],
     ["/file/bot", () => new Response("OGG-IN")],
     ["gemini-3.5-transcribe:generateContent", () => Response.json({ candidates: [{ content: { parts: [{ audioTranscription: { text: "Call Sara back tomorrow." } }] } }] })],
-    ["gemini-3.5-flash-lite:generateContent", () => harnessStatus === 200
-      ? Response.json({ candidates: [{ content: { role: "model", parts: [{ text: harnessAnswer }] } }] })
+    ["api.condense.chat/openai/v1/chat/completions", () => harnessStatus === 200
+      ? Response.json({ choices: [{ message: { role: "assistant", content: harnessAnswer } }] })
       : new Response("overloaded", { status: harnessStatus })],
     ["streamGenerateContent", () => new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: Buffer.from(pcm).toString("base64") } }] } }] })}\r\n\r\n`)],
     ["api.telegram.org", () => Response.json({ ok: true, result: {} })],
@@ -62,6 +62,7 @@ function linkedChat(harnessAnswer: string, harnessStatus = 200) {
     TELEGRAM_BOT_TOKEN: "t",
     TELEGRAM_WEBHOOK_SECRET: "s",
     GEMINI_API_KEY: "k",
+    CONDENSE_API_KEY: "c",
     MEMORY: new Bucket(),
     DB: { prepare: () => ({ bind: () => ({ first: async () => ({ id: "user-1", name: "Sara", email: "s@example.com" }) }) }) },
   } as any;
