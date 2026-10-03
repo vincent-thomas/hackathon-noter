@@ -2,6 +2,8 @@
 
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
+import { processCapture } from "./agent";
+import { createInboxCapture } from "./inbox";
 import { MemoryHarness } from "./memory";
 
 const HELP = `Commands:
@@ -18,6 +20,12 @@ Examples:
   read /tasks/talk-to-erik.md
   search deployment
   search deployment /tasks`;
+
+const USAGE = `Usage:
+  bun run harness
+  bun run harness -- capture "your unstructured thought"
+  bun run harness -- shell
+  bun run harness -- shell list /tasks`;
 
 export type CliIO = {
   write(message: string): void;
@@ -103,14 +111,34 @@ async function main(): Promise<void> {
   const sandboxRoot = resolve(process.env.MEMORY_ROOT ?? "notes/cli");
   const harness = new MemoryHarness(sandboxRoot);
   const io: CliIO = { write: (message) => console.log(message) };
-  const command = process.argv.slice(2);
+  const args = process.argv.slice(2);
 
-  if (command.length) {
-    await executeCommand(harness, command.map((part) => JSON.stringify(part)).join(" "), io);
+  if (args[0] === "capture") {
+    if (args.length < 2) throw new Error(USAGE);
+    await captureAndProcess(sandboxRoot, args.slice(1).join(" "));
+    return;
+  }
+
+  if (args.length && args[0] !== "shell") throw new Error(USAGE);
+  const shellCommand = args.slice(1);
+  if (shellCommand.length) {
+    await executeCommand(harness, shellCommand.map((part) => JSON.stringify(part)).join(" "), io);
     return;
   }
 
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
+
+  if (args[0] !== "shell") {
+    console.log("Noter capture → agent → memory\n");
+    try {
+      const transcript = await terminal.question("What's on your mind? ");
+      await captureAndProcess(sandboxRoot, transcript);
+    } finally {
+      terminal.close();
+    }
+    return;
+  }
+
 
   console.log("Noter memory harness");
   console.log(`Sandbox: ${sandboxRoot}`);
@@ -130,6 +158,32 @@ async function main(): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== "ERR_USE_AFTER_CLOSE") throw error;
   } finally {
     terminal.close();
+  }
+}
+
+async function captureAndProcess(sandboxRoot: string, transcript: string): Promise<void> {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is required. Add it to .env or export it before running the harness.");
+  }
+  const capture = await createInboxCapture(sandboxRoot, { source: "text", transcript });
+  console.log(`\nCaptured ${capture.path}`);
+  console.log("Agent processing…");
+
+  const result = await processCapture({
+    sandboxRoot,
+    capturePath: capture.path,
+    model: process.env.PI_MODEL,
+    onEvent: (event) => {
+      if (event.type === "tool_start") console.log(`  → ${event.tool} ${JSON.stringify(event.input)}`);
+      if (event.type === "tool_end" && event.isError) console.log(`  ✗ ${event.tool} failed`);
+    },
+  });
+
+  if (result.createdPaths.length) {
+    console.log("\nCreated memory:");
+    for (const path of result.createdPaths) console.log(`  ${path}`);
+  } else {
+    console.log("\nNo derived memory was needed.");
   }
 }
 

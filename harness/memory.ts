@@ -12,15 +12,20 @@ import {
 } from "./schemas";
 
 export class MemoryHarness {
-  readonly #root: Promise<string>;
+  readonly #sandboxRoot: string;
+  #preparedRoot?: Promise<string>;
 
   constructor(sandboxRoot: string) {
-    this.#root = prepareSandbox(sandboxRoot);
+    this.#sandboxRoot = sandboxRoot;
+  }
+
+  #root(): Promise<string> {
+    return this.#preparedRoot ??= prepareSandbox(this.#sandboxRoot);
   }
 
   async readMemory(input: unknown): Promise<MemoryFile> {
     const { path } = ReadMemoryInputSchema.parse(input);
-    const root = await this.#root;
+    const root = await this.#root();
     const resolved = await resolveSandboxPath(root, path);
     if (extname(resolved.virtualPath) !== ".md") {
       throw new Error(`memory path must name a Markdown file: ${resolved.virtualPath}`);
@@ -34,7 +39,7 @@ export class MemoryHarness {
 
   async listMemory(input: unknown): Promise<{ files: string[] }> {
     const { path } = ListMemoryInputSchema.parse(input);
-    const root = await this.#root;
+    const root = await this.#root();
     const resolved = await resolveSandboxPath(root, path);
     const stat = await lstat(resolved.hostPath);
     if (stat.isSymbolicLink() || !stat.isDirectory()) {
@@ -45,7 +50,7 @@ export class MemoryHarness {
 
   async searchMemory(input: unknown): Promise<{ files: MemoryFile[] }> {
     const query = SearchMemoryInputSchema.parse(input);
-    const root = await this.#root;
+    const root = await this.#root();
     const scope = query.path ?? "/";
     let paths: string[];
 
@@ -83,7 +88,7 @@ export class MemoryHarness {
 
   async writeMemory(input: unknown): Promise<MemoryFile> {
     const parsed = WriteMemoryInputSchema.parse(input);
-    const root = await this.#root;
+    const root = await this.#root();
     const resolved = await resolveSandboxPath(root, parsed.path, { createParents: true });
     if (resolved.virtualPath === "/inbox" || resolved.virtualPath.startsWith("/inbox/")) {
       throw new Error("write_memory cannot write to /inbox");
@@ -126,4 +131,3 @@ export class MemoryHarness {
     return files.sort();
   }
 }
-
