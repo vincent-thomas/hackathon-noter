@@ -41,14 +41,16 @@ test("configures Telegram to call the production webhook with secret verificatio
 });
 
 // A linked user, empty memory, and fake Telegram and Gemini answering by URL.
-function linkedChat(harnessAnswer: string) {
+function linkedChat(harnessAnswer: string, harnessStatus = 200) {
   const sent: Array<{ url: string; body: any }> = [];
   const pcm = new Uint8Array(4800);
   const routes: Array<[string, () => Response]> = [
     ["/getFile", () => Response.json({ ok: true, result: { file_path: "voice/1.oga" } })],
     ["/file/bot", () => new Response("OGG-IN")],
     ["gemini-3.5-transcribe:generateContent", () => Response.json({ candidates: [{ content: { parts: [{ audioTranscription: { text: "Call Sara back tomorrow." } }] } }] })],
-    ["gemini-3.5-flash-lite:generateContent", () => Response.json({ candidates: [{ content: { role: "model", parts: [{ text: harnessAnswer }] } }] })],
+    ["gemini-3.5-flash-lite:generateContent", () => harnessStatus === 200
+      ? Response.json({ candidates: [{ content: { role: "model", parts: [{ text: harnessAnswer }] } }] })
+      : new Response("overloaded", { status: harnessStatus })],
     ["streamGenerateContent", () => new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: Buffer.from(pcm).toString("base64") } }] } }] })}\r\n\r\n`)],
     ["api.telegram.org", () => Response.json({ ok: true, result: {} })],
   ];
@@ -96,4 +98,12 @@ test("a text message gets a text reply, with 'typing' meanwhile", async () => {
   expect(JSON.parse(chat.calls("sendChatAction")[0].body).action).toBe("typing");
   expect(JSON.parse(chat.calls("sendMessage")[0].body)).toEqual({ chat_id: "42", text: "Noted; Sara gets a call tomorrow.", reply_parameters: { message_id: 7 } });
   expect(chat.calls("sendVoice")).toEqual([]);
+});
+
+test("a failure tells the chat to check the logs, and still fails the update so the Worker logs it", async () => {
+  spyOn(console, "error").mockImplementation(() => {});
+  const chat = linkedChat("", 503);
+  await expect(chat.deliver({ text: "Call Sara back tomorrow." })).rejects.toThrow("503");
+
+  expect(JSON.parse(chat.calls("sendMessage")[0].body)).toEqual({ chat_id: "42", text: "Something broke, check the logs.", reply_parameters: { message_id: 7 } });
 });

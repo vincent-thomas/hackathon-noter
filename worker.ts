@@ -11,6 +11,7 @@ const TextInput = z.object({ text: z.string().trim().min(1).max(100_000) }).stri
 const QueryInput = z.object({ question: z.string().trim().min(1).max(20_000) }).strict();
 
 function jsonError(error: unknown, status = 400) {
+  if (status >= 500) console.error(`request failed with ${status}:`, error);
   return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status });
 }
 
@@ -101,7 +102,9 @@ async function api(request: Request, env: Env): Promise<Response | null> {
       }
       try {
         await audio;
+        const tap = performance.now();
         const transcript = await live.finish();
+        console.log(`transcribe (live): ${Math.round(performance.now() - tap)} ms after the tap → ${JSON.stringify(transcript)}`);
         const conversation = url.searchParams.get("conversation") ?? undefined;
         const answer = transcript ? (await captureMemory(env, user.id, transcript, "voice", conversation)).response : "I didn't catch that.";
         socket.send(JSON.stringify({ transcript }));

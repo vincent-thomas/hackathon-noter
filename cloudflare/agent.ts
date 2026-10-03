@@ -8,7 +8,7 @@ const declarations = [
   { name: "read_memory", description: "Read one Markdown memory file by virtual path.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
   { name: "list_memory", description: "List Markdown files below a virtual directory.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" } }, required: ["path"] } },
   { name: "search_memory", description: "Search by path scope, case-insensitive content, and exact frontmatter.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" }, contains: { type: "STRING" }, frontmatter: { type: "OBJECT" } } } },
-  { name: "write_memory", description: "Create a derived Markdown memory. Never writes inbox or overwrites.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" }, content: { type: "STRING" }, frontmatter: { type: "OBJECT", properties: { id: { type: "STRING" }, created_at: { type: "STRING" } }, required: ["id", "created_at"] } }, required: ["path", "content", "frontmatter"] } },
+  { name: "write_memory", description: "Create a derived Markdown memory. Never writes inbox or overwrites.", parameters: { type: "OBJECT", properties: { path: { type: "STRING" }, content: { type: "STRING" } }, required: ["path", "content"] } },
 ];
 
 type Part = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; functionResponse?: unknown };
@@ -31,6 +31,7 @@ async function generate(env: Env, body: object): Promise<{ content: Content; par
 const READ_ONLY = ["read_memory", "list_memory", "search_memory"];
 
 async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: string, allowed: string[]) {
+  const start = performance.now();
   const contents: Content[] = [{ role: "user", parts: [{ text: prompt }] }];
   const accessed = new Set<string>();
   const created: string[] = [];
@@ -53,6 +54,8 @@ async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: 
 
     const responses: Part[] = [];
     for (const call of calls) {
+      // Each tool call costs a model round trip, so these lines show where the agent spends its time.
+      console.log(`harness: ${Math.round(performance.now() - start)} ms, ${call.name} ${JSON.stringify(call.args ?? {}).slice(0, 120)}`);
       let output: unknown;
       try {
         if (call.name === "read_memory") {
@@ -65,7 +68,12 @@ async function runAgent(env: Env, memory: WorkerMemory, system: string, prompt: 
           output = await memory.search(call.args ?? {});
           for (const file of (output as { files: Array<{ path: string }> }).files) accessed.add(file.path);
         } else if (call.name === "write_memory" && allowed.includes("write_memory")) {
-          output = await memory.write(call.args as any);
+          // The id and timestamp are bookkeeping, so they're filled in here; the model misplaced them.
+          output = await memory.write({
+            path: String(call.args?.path ?? ""),
+            content: String(call.args?.content ?? ""),
+            frontmatter: { id: crypto.randomUUID(), created_at: new Date().toISOString() },
+          });
           created.push((output as { path: string }).path);
         } else throw new Error(`unknown tool: ${call.name}`);
       } catch (error) {
@@ -101,8 +109,10 @@ export async function captureMemory(
   const { prompt, inlined } = capturePrompt(capture, existing, new Date(), history);
   // With all of memory in the prompt, reading, listing or searching only costs model round trips.
   const allowed = allInlined(existing, inlined) ? ["write_memory"] : [...READ_ONLY, "write_memory"];
+  const start = performance.now();
   const result = await runAgent(env, memory, MEMORY_AGENT_SYSTEM_PROMPT, prompt, allowed);
   const response = result.text || "Captured.";
+  console.log(`harness: ${Math.round(performance.now() - start)} ms → ${JSON.stringify(result.createdPaths)}`);
   if (conversation) {
     await env.DB.prepare("INSERT INTO conversation_turns (user_id, conversation, said, answered, created_at) VALUES (?, ?, ?, ?, ?)")
       .bind(userId, conversation, transcript, response, Date.now()).run();

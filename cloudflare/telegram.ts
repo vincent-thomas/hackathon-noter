@@ -71,13 +71,24 @@ async function handleMessage(env: Env, message: any) {
     await send(env, "sendMessage", { chat_id: chatId, text: "Send me a voice note or text message.", reply_parameters: reply });
     return;
   }
+  console.log(`telegram: ${voice ? `voice note, ${message.voice.duration} s` : `text ${JSON.stringify(message.text)}`} from user ${user.id} in chat ${chatId}`);
   // Answered in kind: a voice note for a voice note, text for text.
+  try {
+    await answer(env, chatId, user, message, reply, voice);
+  } catch (error) {
+    // Details stay in the logs; the chat only learns that something broke.
+    await send(env, "sendMessage", { chat_id: chatId, text: "Something broke, check the logs.", reply_parameters: reply }).catch(() => {});
+    throw error;
+  }
+}
+
+async function answer(env: Env, chatId: string, user: User, message: any, reply: { message_id: number }, voice: string | undefined) {
   await whileShowing(env, chatId, voice ? "record_voice" : "typing", async () => {
     const transcript = voice ? await transcribeVoice(env, voice, message.voice.mime_type ?? "audio/ogg") : message.text;
-    const answer = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "I didn't catch that.";
-    if (!voice) return () => send(env, "sendMessage", { chat_id: chatId, text: answer, reply_parameters: reply });
+    const response = transcript ? (await captureMemory(env, user.id, transcript, "telegram")).response || "Captured." : "I didn't catch that.";
+    if (!voice) return () => send(env, "sendMessage", { chat_id: chatId, text: response, reply_parameters: reply });
     const pcm: Uint8Array[] = [];
-    for await (const chunk of speakStream(env.GEMINI_API_KEY, answer)) pcm.push(chunk);
+    for await (const chunk of speakStream(env.GEMINI_API_KEY, response)) pcm.push(chunk);
     const form = new FormData();
     form.append("chat_id", chatId);
     form.append("reply_parameters", JSON.stringify(reply));
@@ -98,7 +109,9 @@ async function whileShowing(env: Env, chatId: string, action: "typing" | "record
   } finally {
     clearInterval(timer);
   }
+  const start = performance.now();
   await reply();
+  console.log(`telegram: replied to chat ${chatId} in ${Math.round(performance.now() - start)} ms`);
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {
@@ -129,10 +142,13 @@ async function linkedUser(env: Env, chatId: string): Promise<User | null> {
 }
 
 async function transcribeVoice(env: Env, fileId: string, mimeType: string) {
+  const start = performance.now();
   const file = await send(env, "getFile", { file_id: fileId });
-  const audio = await fetch(`${TELEGRAM_API}/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
-  if (!audio.ok) throw new Error(`Telegram download failed: ${audio.status}`);
-  return transcribe(env.GEMINI_API_KEY, await audio.arrayBuffer(), mimeType);
+  const response = await fetch(`${TELEGRAM_API}/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
+  if (!response.ok) throw new Error(`Telegram download failed: ${response.status}`);
+  const audio = await response.arrayBuffer();
+  console.log(`telegram: downloaded ${Math.round(audio.byteLength / 1024)} KB in ${Math.round(performance.now() - start)} ms`);
+  return transcribe(env.GEMINI_API_KEY, audio, mimeType);
 }
 
 async function send(env: Env, method: string, body: object | FormData): Promise<any> {

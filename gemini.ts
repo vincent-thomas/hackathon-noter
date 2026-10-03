@@ -33,11 +33,14 @@ async function generate(apiKey: string, model: string, body: object): Promise<an
 }
 
 export async function transcribe(apiKey: string, audio: ArrayBuffer | Uint8Array, mimeType: string): Promise<string> {
+  const start = performance.now();
   const parts = await generate(apiKey, "gemini-3.5-transcribe", {
     contents: [{ parts: [{ inlineData: { mimeType, data: toBase64(new Uint8Array(audio)) } }] }],
   });
   // The transcript comes in an audioTranscription part, not in text.
-  return parts.find((p) => p.audioTranscription)?.audioTranscription.text ?? "";
+  const transcript = parts.find((p) => p.audioTranscription)?.audioTranscription.text ?? "";
+  console.log(`transcribe: ${Math.round(audio.byteLength / 1024)} KB of ${mimeType} in ${Math.round(performance.now() - start)} ms → ${JSON.stringify(transcript)}`);
+  return transcript;
 }
 
 // The lite model streams about twice as fast: first audio in ~0.7 s instead of ~1.2 s.
@@ -51,9 +54,12 @@ const ttsRequest = (text: string) => ({
 
 /** A complete WAV file, C2PA provenance chunk included. */
 export async function speak(apiKey: string, text: string): Promise<Bytes> {
+  const start = performance.now();
   const audio = (await generate(apiKey, TTS, ttsRequest(text))).find((p) => p.inlineData)?.inlineData.data;
   if (!audio) throw new Error(`${TTS} returned no audio`);
-  return fromBase64(audio);
+  const wav = fromBase64(audio);
+  console.log(`speak: ${Math.round(performance.now() - start)} ms → ${Math.round(wav.length / 1024)} KB`);
+  return wav;
 }
 
 // Streamed TTS is bare 24 kHz mono 16-bit PCM, sent as it's generated: the first audio arrives
