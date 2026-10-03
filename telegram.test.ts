@@ -74,7 +74,7 @@ test("a voice note gets a voice note back, as a reply", async () => {
     "gemini-3.8-flash-tts": () => Response.json({ candidates: [{ content: { parts: [{ inlineData: { data: "V0FW" } }] } }] }),
     sendVoice: () => ok({}),
   });
-  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("The sandbox heard: buy milk.")).mockReturnValueOnce(proc("OGG-OUT"));
+  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("buy milk")).mockReturnValueOnce(proc("OGG-OUT"));
 
   expect(await pollOnce(0)).toBe(8);
 

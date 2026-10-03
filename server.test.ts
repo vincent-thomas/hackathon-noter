@@ -21,7 +21,7 @@ const sandbox = (stdout: string, code = 0, stderr = "") => spyOn(Bun, "spawn").m
 
 test("talk transcribes the recording, runs the harness in a sandbox, and speaks its reply", async () => {
   const gemini = spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
-  const spawn = sandbox("The sandbox heard: hello there. It has 1 notes.\n");
+  const spawn = sandbox("hello there\n");
   const res = await post();
 
   const [cmd, opts] = spawn.mock.calls[0] as [string[], { stdin: Blob }];
@@ -37,7 +37,7 @@ test("talk transcribes the recording, runs the harness in a sandbox, and speaks 
   expect(sent(stt).contents[0].parts[0].inlineData).toEqual({ mimeType: "audio/webm", data: "YWJj" });
   expect(tts[0]).toContain("gemini-3.8-flash-tts:generateContent");
   expect(sent(tts)).toEqual({
-    contents: [{ parts: [{ text: "The sandbox heard: hello there. It has 1 notes." }] }],
+    contents: [{ parts: [{ text: "hello there" }] }],
     generationConfig: { responseModalities: ["AUDIO"] },
   });
 
@@ -48,7 +48,7 @@ test("talk transcribes the recording, runs the harness in a sandbox, and speaks 
 
 test("Accept: audio/ogg turns the reply into an OGG/Opus voice note", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(heard("hello there")).mockResolvedValueOnce(spoken());
-  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("The sandbox heard: hello there.")).mockReturnValueOnce(proc("OggS..."));
+  const spawn = spyOn(Bun, "spawn").mockReturnValueOnce(proc("hello there")).mockReturnValueOnce(proc("OggS..."));
   const res = await talk(
     new Request("http://x/api/talk", { method: "POST", headers: { "content-type": "audio/ogg", accept: "audio/ogg" }, body: "abc" }),
   );

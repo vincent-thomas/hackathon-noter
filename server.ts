@@ -44,14 +44,14 @@ async function run(cmd: string[], input: string | Bytes): Promise<Bytes> {
 }
 
 // One throwaway container per request. The user's notes folder is its only writable path.
-// The proof-of-concept harness just files the transcript and reports the count.
+// The proof-of-concept harness files the transcript as a note and replies with it unchanged.
 async function harness(transcript: string): Promise<string> {
   const notes = `${import.meta.dir}/notes/${USER_ID}`;
   await mkdir(notes, { recursive: true });
   const reply = await run([
     "docker", "run", "--rm", "-i", "--network", "none", "--cap-drop", "ALL", "--memory", "256m", "--read-only",
     "-v", `${notes}:/notes`, "alpine",
-    "sh", "-c", 't=$(cat); echo "$t" >> /notes/notes.txt; echo "The sandbox heard: $t. It has $(wc -l < /notes/notes.txt) notes."',
+    "sh", "-c", 't=$(cat); echo "$t" >> /notes/notes.txt; echo "$t"',
   ], transcript);
   return reply.toString().trim();
 }

@@ -1,6 +1,6 @@
 # Noter
 
-Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), hands the text to a harness running in a sandbox container, and speaks the harness's reply with Gemini TTS (`gemini-3.8-flash-tts`). For now the harness only files each transcript as a note and reports the count. The LLM that records, queries and updates notes comes next.
+Talk to it in the browser. It transcribes what you say (`gemini-3.5-transcribe`), hands the text to a harness running in a sandbox container, and speaks the harness's reply with Gemini TTS (`gemini-3.8-flash-tts`). For now the harness only files each transcript as a note and replies with it unchanged. The LLM that records, queries and updates notes comes next.
 
 ## Run it
 
@@ -11,7 +11,7 @@ echo GEMINI_API_KEY=your-key > .env
 docker compose up
 ```
 
-Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said, and a Gemini voice answers "The sandbox heard: … It has N notes."
+Open http://localhost:3000. Tap the mic, talk, tap again. The page shows what you said, and a Gemini voice says it back.
 
 The project folder is mounted into the container. Saving `server.ts` restarts the server, and `index.html` changes show up when you reload the page.
 
