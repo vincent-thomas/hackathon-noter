@@ -9,7 +9,9 @@ import {
 import { z } from "zod";
 import type { Env, User } from "./types";
 
-const EmailInput = z.object({ email: z.string().trim().toLowerCase().email().max(254) }).strict();
+// Deliberately loose: an address only needs an @. Strict format checks reject real addresses,
+// and local ones like test@localhost.
+const EmailInput = z.object({ email: z.string().trim().toLowerCase().includes("@").max(254) }).strict();
 const VerifyInput = z.object({ ceremonyId: z.string().uuid(), response: z.record(z.string(), z.unknown()) }).strict();
 const COOKIE = "noter_session";
 
